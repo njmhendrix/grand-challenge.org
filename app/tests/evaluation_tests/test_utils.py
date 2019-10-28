@@ -5,6 +5,47 @@ from factory.django import mute_signals
 from grandchallenge.evaluation.models import Config
 from tests.factories import ResultFactory, ChallengeFactory, UserFactory
 
+from scipy.stats import wilcoxon
+import numpy as np
+from itertools import permutations
+
+@pytest.mark.django_db
+def test_calculate_statistical_ranking(dat, signif_level=0.05):
+    # dat.shape = (number of algorithms, samplesize)
+
+    # get all the matching between the algorithms,
+    pair_matching = permutations(range(dat.shape[0]), 2)
+    scores = {}
+    ranks = {}
+
+    # Considering for a single task.
+    for j, i in pair_matching:
+        ranks[(j)] = []
+        rank, pvalue = wilcoxon(dat[j, :], dat[i, :], alternative='greater')
+        scores[(j, i)] = pvalue
+        ranks[(j)].append(int(pvalue < signif_level))
+
+
+    final_score = [np.mean(ranks[i]) for i in range(dat.shape[0])]
+
+    return final_score
+
+
+def create_test_results():
+    firstalg = [0.96470596, 0.96672794, 0.96450069, 0.97164024, 0.85891965]
+    secondalg = [0.89021598, 0.94046324, 0.96674816, 0.88781786, 0.94351457]
+    thirdalg = [0.24, 0.34, 0.22, 0.356, 0.12]
+    dat = np.hstack(firstalg, secondalg, thirdalg)
+    print(dat.shape)
+    ranking_scores = [0.5, 0.5, 0]
+
+    return dat, ranking_scores
+
+def test_statistical_ranking():
+    dat, ranking_scores = create_test_results()
+    print(dat.shape, 'dat shape')
+    final_score = test_calculate_statistical_ranking(dat, signif_level=0.05)
+    assert final_score == ranking_scores
 
 @pytest.mark.django_db
 def test_calculate_ranks(settings):
