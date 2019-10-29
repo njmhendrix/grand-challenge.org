@@ -184,6 +184,7 @@ CACHES = {
         "LOCATION": "memcached:11211",
     }
 }
+SPEEDINFO_STORAGE = "speedinfo.storage.cache.storage.CacheStorage"
 
 ROOT_URLCONF = "config.urls"
 SUBDOMAIN_URL_CONF = "grandchallenge.subdomains.urls"
@@ -282,6 +283,8 @@ MIDDLEWARE = (
     "grandchallenge.subdomains.middleware.subdomain_middleware",
     "grandchallenge.subdomains.middleware.challenge_subdomain_middleware",
     "grandchallenge.subdomains.middleware.subdomain_urlconf_middleware",
+    # Flatpage fallback almost last
+    "django.contrib.flatpages.middleware.FlatpageFallbackMiddleware",
     # speedinfo at the end but before FetchFromCacheMiddleware
     "speedinfo.middleware.ProfilerMiddleware",
 )
