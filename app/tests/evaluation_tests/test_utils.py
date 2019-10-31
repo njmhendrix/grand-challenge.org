@@ -1,13 +1,13 @@
+import numpy as np
 import pytest
 from django.db.models.signals import post_save
 from factory.django import mute_signals
+from itertools import permutations
+from scipy.stats import wilcoxon
 
 from grandchallenge.evaluation.models import Config
-from tests.factories import ResultFactory, ChallengeFactory, UserFactory
+from tests.factories import ChallengeFactory, ResultFactory, UserFactory
 
-from scipy.stats import wilcoxon
-import numpy as np
-from itertools import permutations
 
 @pytest.mark.django_db
 def test_calculate_statistical_ranking(dat, signif_level=0.05):
@@ -21,10 +21,9 @@ def test_calculate_statistical_ranking(dat, signif_level=0.05):
     # Considering for a single task.
     for j, i in pair_matching:
         ranks[(j)] = []
-        rank, pvalue = wilcoxon(dat[j, :], dat[i, :], alternative='greater')
+        rank, pvalue = wilcoxon(dat[j, :], dat[i, :], alternative="greater")
         scores[(j, i)] = pvalue
         ranks[(j)].append(int(pvalue < signif_level))
-
 
     final_score = [np.mean(ranks[i]) for i in range(dat.shape[0])]
 
@@ -41,11 +40,13 @@ def create_test_results():
 
     return dat, ranking_scores
 
+
 def test_statistical_ranking():
     dat, ranking_scores = create_test_results()
-    print(dat.shape, 'dat shape')
+    print(dat.shape, "dat shape")
     final_score = test_calculate_statistical_ranking(dat, signif_level=0.05)
     assert final_score == ranking_scores
+
 
 @pytest.mark.django_db
 def test_calculate_ranks(settings):
