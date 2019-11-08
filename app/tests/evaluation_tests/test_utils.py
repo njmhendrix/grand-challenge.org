@@ -20,33 +20,86 @@ def test_calculate_statistical_ranking(dat, signif_level=0.05):
 
     # Considering for a single task.
     for j, i in pair_matching:
-        ranks[(j)] = []
+        if not j in ranks:
+            ranks[(j)] = []
         rank, pvalue = wilcoxon(dat[j, :], dat[i, :], alternative="greater")
         scores[(j, i)] = pvalue
         ranks[(j)].append(int(pvalue < signif_level))
 
-    final_score = [np.mean(ranks[i]) for i in range(dat.shape[0])]
+    final_score = [np.mean(ranks[(i)]) for i in range(dat.shape[0])]
 
     return final_score
 
 
-def create_test_results():
-    firstalg = [0.96470596, 0.96672794, 0.96450069, 0.97164024, 0.85891965]
-    secondalg = [0.89021598, 0.94046324, 0.96674816, 0.88781786, 0.94351457]
-    thirdalg = [0.24, 0.34, 0.22, 0.356, 0.12]
-    dat = np.hstack(firstalg, secondalg, thirdalg)
-    print(dat.shape)
+def create_test_results(settings):
+    # firstalg = [0.96470596, 0.96672794, 0.96450069, 0.97164024, 0.85891965]
+    # secondalg = [0.89021598, 0.94046324, 0.96674816, 0.88781786, 0.94351457]
+    # thirdalg = [0.24, 0.34, 0.22, 0.356, 0.12]
+    # dat = np.vstack((firstalg, secondalg, thirdalg))
+    # print(dat.shape)
+    settings.task_eager_propagates = (True,)
+    settings.task_always_eager = (True,)
+
+    challenge = ChallengeFactory()
+    with mute_signals(post_save):
+        user1 = UserFactory()
+        user2 = UserFactory()
+        queryset = (
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"dice": 0.3},  # Invalid result
+                job__submission__creator=user1,
+            ),
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"jaccard": 0.6},
+                job__submission__creator=user1,
+            ),
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"jaccard": 0.4},
+                job__submission__creator=user1,
+            ),
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"jaccard": 0.2},
+                job__submission__creator=user1,
+            ),
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"jaccard": 0.1},
+                job__submission__creator=user2,
+
+            ),
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"jaccard": 0.5},
+                job__submission__creator=user2,
+            ),
+            ResultFactory(
+                job__submission__challenge=challenge,
+                metrics={"jaccard": 0.3},
+                job__submission__creator=user2,
+            ),
+        )
+
+
+    challenge.evaluation_config.score_jsonpath = "a"
+    challenge.evaluation_config.result_display_choice = Config.ALL
+    challenge.evaluation_config.save()
+
     ranking_scores = [0.5, 0.5, 0]
 
-    return dat, ranking_scores
+    # return dat, ranking_scores
 
 
 def test_statistical_ranking():
     dat, ranking_scores = create_test_results()
     print(dat.shape, "dat shape")
     final_score = test_calculate_statistical_ranking(dat, signif_level=0.05)
+    print('final score ', final_score)
+    print('ranking score', ranking_scores)
     assert final_score == ranking_scores
-
 
 @pytest.mark.django_db
 def test_calculate_ranks(settings):
