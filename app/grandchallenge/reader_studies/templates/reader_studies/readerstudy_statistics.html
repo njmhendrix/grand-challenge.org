@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% load url %}
+{% load workstations %}
+
+{% block breadcrumbs %}
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{% url 'home' %}"><i class="fas fa-home"></i></a></li>
+        <li class="breadcrumb-item"><a href="{% url 'reader-studies:list' %}">Reader
+            Studies</a></li>
+        <li class="breadcrumb-item"><a href="{{ object.get_absolute_url }}">{{ object }}</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Statistics</li>
+    </ol>
+{% endblock %}
+
+{% block content %}
+
+    <h1>Reader Study {{ object.title }} - Statistics</h1>
+
+    <div class="table-responsive mt-3">
+        <h2 class="h3">Statistics per case</h2>
+        <table class="table table-hover table-striped table-sm mb-3">
+            <thead>
+                <tr>
+                    <th>Image name</th>
+                    <th>Total score / max score</th>
+                    <th>Average score</th>
+                    <th>View image</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in object.statistics.scores_by_case %}
+                    <tr>
+                        <td data-order="{{ entry.images__name }}">{{ entry.images__name }}</td>
+                        <td data-order="{{ entry.score__sum|stringformat:'020f' }}">{{ entry.score__sum }} / {{ object.statistics.max_score_cases }}</td>
+                        <td data-order="{{ entry.score__avg|stringformat:'020f' }}">{{ entry.score__avg }}</td>
+                        <td data-order="{{ entry.images__name }}">
+                            <a href="{% url 'workstations:workstation-session-redirect' slug=object.workstation.slug %}?{% workstation_query image=entry.images__pk config=object.workstation_config %}">
+                                <span class="badge badge-primary">
+                                    <i class="fa fa-eye"></i>
+                                </span>
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h2 class="h3">Statistics per question</h2>
+        <table class="table table-hover table-striped table-sm">
+             <thead>
+                <tr>
+                    <th>Question</th>
+                    <th>Total score / max score</th>
+                    <th>Average score</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in object.statistics.scores_by_question %}
+                    <tr>
+                        <td data-order="{{ entry.question__question_text }}">{{ entry.question__question_text }}</td>
+                        <td data-order="{{ entry.score__sum|stringformat:'020f' }}">{{ entry.score__sum }} / {{ object.statistics.max_score_questions }}</td>
+                        <td data-order="{{ entry.score__avg|stringformat:'020f' }}">{{ entry.score__avg }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}
+
+{% block script %}
+    {{ block.super }}
+    <script type="text/javascript">
+        $(document).ready(function () {
+            $('.table').each(function() {
+                $(this).DataTable({
+                    pageLength: 100,
+                });
+            });
+        });
+        $(window).resize(function () {
+            $('.table').each(function() {
+                $(this).DataTable().columns.adjust();
+            });
+        });
+    </script>
+{% endblock %}
+

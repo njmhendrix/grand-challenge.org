@@ -19,11 +19,6 @@ annotation_router.register(
     basename="polygonannotationset",
 )
 annotation_router.register(
-    "landmarkannotationset",
-    views.LandmarkAnnotationSetViewSet,
-    basename="landmarkannotationset",
-)
-annotation_router.register(
     "etdrsgridannotation",
     views.ETDRSGridAnnotationViewSet,
     basename="etdrsgridannotation",
@@ -49,13 +44,7 @@ annotation_router.register(
     basename="imagetextannotation",
 )
 urlpatterns = [
-    path(
-        "archives/",
-        cache_page(settings.RETINA_IMAGE_CACHE_TIME)(
-            views.ArchiveView.as_view()
-        ),
-        name="archives-api-view",
-    ),
+    path("archives/", views.ArchiveView.as_view(), name="archives-api-view",),
     path(
         "archive_data/",
         cache_page(settings.RETINA_IMAGE_CACHE_TIME)(

@@ -89,7 +89,7 @@ Running Grand-Challenge within a Windows environment requires additional steps b
 Running the Tests
 -----------------
 
-TravisCI_ is used to run the test suite on every new commit. 
+GitHub actions is used to run the test suite on every new commit.
 You can also run the tests locally by 
 
 1. In a console window make sure the database is running
@@ -156,11 +156,13 @@ It is recommended to setup django integration to ensure that the code completion
 6. In the settings window navigate to ``Tools`` -> ``Python integrated tools``
 7. Under the testing section select ``pytest`` as the default test runner
 8. Under the Docstrings section set ``NumPy`` as the docstrings format
-9. In the settings window navigate to ``Editor`` -> ``Code Style`` -> ``Python``
-10. On the ``Wrapping and Braces`` tab set ``Hard wrap at`` to ``86`` and ``Visual guide`` to ``79``
-11. On the ``Imports`` tab enable ``Sort Import Statements``, ``Sort imported names in "from" imports``, and ``Sort plain and "from" imports separately in the same group``
-12. Click ``OK``
-13. Install the ``Flake8 Support`` plugin so that PyCharm will understand ``noqa`` comments
+9. In the settings window navigate to ``Editor`` -> ``Code Style``
+10. Click on the ``Formatter Control`` tab and enable ``Enable formatter markers in comments``
+11. In the settings window navigate to ``Editor`` -> ``Code Style`` -> ``Python``
+12. On the ``Wrapping and Braces`` tab set ``Hard wrap at`` to ``86`` and ``Visual guide`` to ``79``
+13. On the ``Imports`` tab enable ``Sort Import Statements``, ``Sort imported names in "from" imports``, and ``Sort plain and "from" imports separately in the same group``
+14. Click ``OK``
+15. Install the ``Flake8 Support`` plugin so that PyCharm will understand ``noqa`` comments
 
 It is also recommended to install the black extension (version ``19.10b0``) for code formatting.
 
@@ -277,7 +279,6 @@ If you want to run this in a production environment you will need to make severa
 2. `Disable mounting of the docker socket <https://docs.docker.com/engine/security/https/>`_
 3. Removing the users that are created by ``init_gc_demo``
 
-.. _TravisCI: https://travis-ci.org/comic/grand-challenge.org
 .. _Docker: https://docs.docker.com/install/
 .. _`Docker Compose`: https://docs.docker.com/compose/install/
 .. _`Docker for Windows`: https://docs.docker.com/docker-for-windows/install/

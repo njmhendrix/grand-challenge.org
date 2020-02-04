@@ -3,7 +3,8 @@ from django.dispatch import receiver
 from guardian.shortcuts import assign_perm, remove_perm
 
 from grandchallenge.cases.models import Image
-from grandchallenge.reader_studies.models import ReaderStudy
+from grandchallenge.reader_studies.models import Answer, ReaderStudy
+from grandchallenge.reader_studies.tasks import add_scores
 
 
 @receiver(m2m_changed, sender=ReaderStudy.images.through)
@@ -40,3 +41,15 @@ def update_image_permissions(instance, action, reverse, model, pk_set, **_):
 
     for rs in reader_studies:
         op("view_image", rs.readers_group, images)
+
+
+@receiver(m2m_changed, sender=Answer.images.through)
+def assign_score(instance, action, reverse, model, pk_set, **_):
+    if action != "post_add":
+        return
+    add_scores.apply_async(
+        kwargs={
+            "instance_pk": str(instance.pk),
+            "pk_set": list(map(str, pk_set)),
+        }
+    )

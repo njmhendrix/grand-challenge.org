@@ -10,9 +10,12 @@ from django.contrib.auth.mixins import (
     UserPassesTestMixin,
 )
 from django.contrib.messages.views import SuccessMessageMixin
+from django.core.exceptions import ValidationError
 from django.http import Http404, HttpResponse
+from django.urls import reverse
 from django.views.generic import (
     CreateView,
+    DeleteView,
     DetailView,
     FormView,
     ListView,
@@ -45,6 +48,7 @@ from grandchallenge.core.permissions.rest_framework import (
 )
 from grandchallenge.reader_studies.forms import (
     EditorsForm,
+    GroundTruthForm,
     QuestionForm,
     ReaderStudyCreateForm,
     ReaderStudyUpdateForm,
@@ -58,7 +62,7 @@ from grandchallenge.reader_studies.serializers import (
 )
 
 
-class ReaderStudyList(LoginRequiredMixin, PermissionListMixin, ListView):
+class ReaderStudyList(PermissionListMixin, ListView):
     model = ReaderStudy
     permission_required = (
         f"{ReaderStudy._meta.app_label}.view_{ReaderStudy._meta.model_name}"
@@ -111,8 +115,21 @@ class ReaderStudyDetail(
                 self.request.user
             )
             context.update({"progress": user_progress})
+
+        reader_remove_form = ReadersForm()
+        reader_remove_form.fields["action"].initial = ReadersForm.REMOVE
+        editor_remove_form = EditorsForm()
+        editor_remove_form.fields["action"].initial = EditorsForm.REMOVE
         context.update(
-            {"user_is_reader": self.object.is_reader(user=self.request.user)}
+            {
+                "user_score": self.object.score_for_user(self.request.user),
+                "answerable_questions": self.object.answerable_question_count,
+                "editor_remove_form": editor_remove_form,
+                "reader_remove_form": reader_remove_form,
+                "user_is_reader": self.object.is_reader(
+                    user=self.request.user
+                ),
+            }
         )
         return context
 
@@ -131,6 +148,46 @@ class ReaderStudyUpdate(
         kwargs = super().get_form_kwargs()
         kwargs.update({"user": self.request.user})
         return kwargs
+
+
+class ReaderStudyDelete(
+    LoginRequiredMixin, ObjectPermissionRequiredMixin, DeleteView
+):
+    model = ReaderStudy
+    permission_required = (
+        f"{ReaderStudy._meta.app_label}.change_{ReaderStudy._meta.model_name}"
+    )
+    raise_exception = True
+    success_message = "Reader study was successfully deleted"
+
+    def get_success_url(self):
+        return reverse("reader-studies:list")
+
+    def delete(self, request, *args, **kwargs):
+        messages.success(self.request, self.success_message)
+        return super().delete(request, *args, **kwargs)
+
+
+class ReaderStudyLeaderBoard(
+    LoginRequiredMixin, ObjectPermissionRequiredMixin, DetailView
+):
+    model = ReaderStudy
+    permission_required = (
+        f"{ReaderStudy._meta.app_label}.change_{ReaderStudy._meta.model_name}"
+    )
+    raise_exception = True
+    template_name = "reader_studies/readerstudy_leaderboard.html"
+
+
+class ReaderStudyStatistics(
+    LoginRequiredMixin, ObjectPermissionRequiredMixin, DetailView
+):
+    model = ReaderStudy
+    permission_required = (
+        f"{ReaderStudy._meta.app_label}.change_{ReaderStudy._meta.model_name}"
+    )
+    raise_exception = True
+    template_name = "reader_studies/readerstudy_statistics.html"
 
 
 class QuestionUpdate(
@@ -157,15 +214,15 @@ class QuestionUpdate(
         for field_name in self.object.read_only_fields:
             form_fields[field_name].required = False
             form_fields[field_name].disabled = True
-
+        context.update({"reader_study": self.reader_study})
         return context
 
     def get_success_url(self):
         return self.object.reader_study.get_absolute_url()
 
 
-class AddObjectToReaderStudyMixin(
-    LoginRequiredMixin, ObjectPermissionRequiredMixin, CreateView
+class BaseAddObjectToReaderStudyMixin(
+    LoginRequiredMixin, ObjectPermissionRequiredMixin
 ):
     """
     Mixin that adds an object that has a foreign key to a reader study and a
@@ -194,6 +251,8 @@ class AddObjectToReaderStudyMixin(
         )
         return context
 
+
+class AddObjectToReaderStudyMixin(BaseAddObjectToReaderStudyMixin, CreateView):
     def form_valid(self, form):
         form.instance.creator = self.request.user
         form.instance.reader_study = self.reader_study
@@ -201,6 +260,30 @@ class AddObjectToReaderStudyMixin(
 
     def get_success_url(self):
         return self.object.reader_study.get_absolute_url()
+
+
+class AddGroundTruthToReaderStudy(BaseAddObjectToReaderStudyMixin, FormView):
+    form_class = GroundTruthForm
+    template_name = "reader_studies/readerstudy_add_object.html"
+    type_to_add = "ground truth"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs.update({"reader_study": self.reader_study})
+        return kwargs
+
+    def form_valid(self, form):
+        try:
+            self.reader_study.add_ground_truth(
+                data=form.cleaned_data["ground_truth"], user=self.request.user,
+            )
+            return super().form_valid(form)
+        except ValidationError as e:
+            form.errors["ground_truth"] = e
+            return self.form_invalid(form)
+
+    def get_success_url(self):
+        return self.reader_study.get_absolute_url()
 
 
 class AddImagesToReaderStudy(AddObjectToReaderStudyMixin):

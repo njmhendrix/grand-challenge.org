@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load url from grandchallenge_tags %}
+{% load url %}
 {% load user_profile_link from profiles %}
 
 {% block title %}Your Challenges - {{ block.super }}{% endblock %}
@@ -8,8 +8,7 @@
 
     <h2>Your Challenges</h2>
 
-    <p>This is a list of the challenges that you are participating in on
-        {{ challenge.short_name }}.</p>
+    <p>This is a list of the challenges that you are participating in.</p>
 
     <div class="table-responsive">
         <table class="table table-hover table-borderless table-sm" id="challengesTable">

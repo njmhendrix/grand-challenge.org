@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from urllib.parse import unquote, urljoin
 
@@ -18,6 +19,7 @@ from grandchallenge.container_exec.backends.docker import Service
 from grandchallenge.container_exec.models import ContainerImageModel
 from grandchallenge.container_exec.tasks import start_service, stop_service
 from grandchallenge.core.models import UUIDModel
+from grandchallenge.core.storage import public_s3_storage
 from grandchallenge.subdomains.utils import reverse
 
 __doc__ = """
@@ -33,11 +35,15 @@ The container instance will have the users API token set in the environment, so 
 The user is able to stop the container, otherwise it will be terminated after ``maxmium_duration`` is reached.
 """
 
+logger = logging.getLogger(__name__)
+
 
 class Workstation(UUIDModel, TitleSlugDescriptionModel):
     """Store the title and description of a workstation."""
 
-    logo = models.ImageField(upload_to=get_logo_path)
+    logo = models.ImageField(
+        upload_to=get_logo_path, storage=public_s3_storage
+    )
     editors_group = models.OneToOneField(
         Group,
         on_delete=models.CASCADE,
@@ -266,7 +272,8 @@ class Session(UUIDModel):
     )
     maximum_duration = models.DurationField(default=timedelta(minutes=10))
     user_finished = models.BooleanField(default=False)
-    history = HistoricalRecords()
+    logs = models.TextField(editable=False, blank=True)
+    history = HistoricalRecords(excluded_fields=["logs"])
 
     class Meta(UUIDModel.Meta):
         ordering = ("created", "creator")
@@ -325,7 +332,7 @@ class Session(UUIDModel):
 
         if settings.DEBUG:
             # Allow the container to communicate with the dev environment
-            env.update({"GRAND_CHALLENGE_UNSAFE": "True"})
+            env.update({"GRAND_CHALLENGE_UNSAFE": "true"})
 
         return env
 
@@ -389,6 +396,7 @@ class Session(UUIDModel):
 
     def stop(self) -> None:
         """Stop the service for this session, cleaning up all of the containers."""
+        self.logs = self.service.logs()
         self.service.stop_and_cleanup()
         self.update_status(status=self.STOPPED)
 
