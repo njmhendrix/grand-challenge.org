@@ -123,7 +123,8 @@ class ReaderStudyDetail(
         context.update(
             {
                 "user_score": self.object.score_for_user(self.request.user),
-                "answerable_questions": self.object.answerable_question_count,
+                "answerable_questions": self.object.answerable_question_count
+                * len(self.object.hanging_list),
                 "editor_remove_form": editor_remove_form,
                 "reader_remove_form": reader_remove_form,
                 "user_is_reader": self.object.is_reader(
@@ -188,6 +189,8 @@ class ReaderStudyStatistics(
     )
     raise_exception = True
     template_name = "reader_studies/readerstudy_statistics.html"
+    # TODO: this view also contains the ground truth answer values.
+    # If the permission is changed to 'read', we need to filter these values out.
 
 
 class QuestionUpdate(

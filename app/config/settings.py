@@ -584,7 +584,7 @@ CONTAINER_EXEC_MEMORY_LIMIT = os.environ.get(
 )
 CONTAINER_EXEC_IO_IMAGE = "alpine:3.9"
 CONTAINER_EXEC_IO_SHA256 = (
-    "sha256:055936d3920576da37aa9bc460d70c5f212028bda1c08c0879aedf03d7a66ea1"
+    "sha256:82f67be598ebc8d968137c18521fe174ca6afc9b542aa5773c32b3a3970e647c"
 )
 CONTAINER_EXEC_CPU_QUOTA = int(
     os.environ.get("CONTAINER_EXEC_CPU_QUOTA", "100000")
@@ -696,6 +696,33 @@ DISALLOWED_CHALLENGE_NAMES = [
     *USERNAME_DENYLIST,
 ]
 
+# Modality name constants
+MODALITY_OCT = "OCT"  # Optical coherence tomography
+MODALITY_CF = "Fundus Photography"  # Color fundus photography
+MODALITY_FA = "Flurescein Angiography"  # Fluorescein angiography
+MODALITY_IR = "Infrared Reflectance Imaging"  # Infrared Reflectance imaging
+
+# Maximum file size in bytes to be opened by SimpleITK.ReadImage in cases.models.Image.get_sitk_image()
+MAX_SITK_FILE_SIZE = 268435456  # == 256 mb
+
+# Internal format to use for metaimages
+ITK_INTERNAL_FILE_FORMAT = os.environ.get(
+    "ITK_INTERNAL_FILE_FORMAT", "mha"
+).lower()
+
+# Tile size in pixels to be used when creating dzi for tif files
+DZI_TILE_SIZE = 2560
+
+# Default maximum width or height for thumbnails in retina workstation
+RETINA_DEFAULT_THUMBNAIL_SIZE = 128
+
+# Retina specific settings
+RETINA_IMAGE_CACHE_TIME = 60 * 60 * 24 * 7
+RETINA_GRADERS_GROUP_NAME = "retina_graders"
+RETINA_ADMINS_GROUP_NAME = "retina_admins"
+RETINA_IMPORT_USER_NAME = "retina_import_user"
+RETINA_EXCEPTION_ARCHIVE = "Australia"
+
 ENABLE_DEBUG_TOOLBAR = False
 
 if DEBUG:
@@ -726,25 +753,3 @@ if DEBUG:
         DEBUG_TOOLBAR_CONFIG = {
             "SHOW_TOOLBAR_CALLBACK": "config.toolbar_callback"
         }
-
-# Modality name constants
-MODALITY_OCT = "OCT"  # Optical coherence tomography
-MODALITY_CF = "Fundus Photography"  # Color fundus photography
-MODALITY_FA = "Flurescein Angiography"  # Fluorescein angiography
-MODALITY_IR = "Infrared Reflectance Imaging"  # Infrared Reflectance imaging
-
-# Maximum file size in bytes to be opened by SimpleITK.ReadImage in cases.models.Image.get_sitk_image()
-MAX_SITK_FILE_SIZE = 268435456  # == 256 mb
-
-# Tile size in pixels to be used when creating dzi for tif files
-DZI_TILE_SIZE = 2560
-
-# Default maximum width or height for thumbnails in retina workstation
-RETINA_DEFAULT_THUMBNAIL_SIZE = 128
-
-# Retina specific settings
-RETINA_IMAGE_CACHE_TIME = 60 * 60 * 24 * 7
-RETINA_GRADERS_GROUP_NAME = "retina_graders"
-RETINA_ADMINS_GROUP_NAME = "retina_admins"
-RETINA_IMPORT_USER_NAME = "retina_import_user"
-RETINA_EXCEPTION_ARCHIVE = "Australia"
