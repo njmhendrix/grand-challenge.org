@@ -3,7 +3,7 @@
 {% load guardian_tags %}
 {% load user_profile_link from profiles %}
 {% load humanize %}
-{% load url from grandchallenge_tags %}
+{% load url %}
 
 {% block content %}
 
@@ -97,6 +97,11 @@
                     </a>
                 {% endif %}
             </dd>
+        {% endif %}
+
+        {% if challenge.evaluation_config.display_submission_comments %}
+            <dt>Comment:</dt>
+            <dd>{{ object.job.submission.comment }}</dd>
         {% endif %}
 
         {% if request.user.is_staff and object.job.submission.annotationset %}

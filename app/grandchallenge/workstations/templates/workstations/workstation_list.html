@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% load crispy from crispy_forms_tags %}
-{% load url from grandchallenge_tags %}
+{% load url %}
 {% load guardian_tags %}
 
 {% block title %}Workstations - {{ block.super }}{% endblock %}
 
 {% block breadcrumbs %}
     <ol class="breadcrumb">
-        <li class="breadcrumb-item"><a href="{% url 'home' %}">Home</a></li>
+        <li class="breadcrumb-item"><a href="{% url 'home' %}"><i class="fas fa-home"></i></a></li>
         <li class="breadcrumb-item active" aria-current="page">Workstations
         </li>
     </ol>

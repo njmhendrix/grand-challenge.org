@@ -1,7 +1,9 @@
 import base64
+import json
 import logging
 from io import BytesIO
 
+import boto3
 from PIL import Image
 from django.conf import settings
 from django.contrib.auth.models import Group
@@ -19,10 +21,12 @@ from grandchallenge.challenges.models import (
     BodyRegion,
     BodyStructure,
     Challenge,
+    ChallengeSeries,
     ExternalChallenge,
     ImagingModality,
     TaskType,
 )
+from grandchallenge.core.storage import public_s3_storage
 from grandchallenge.evaluation.models import Job, Method, Result, Submission
 from grandchallenge.pages.models import Page
 from grandchallenge.reader_studies.models import Answer, Question, ReaderStudy
@@ -45,6 +49,8 @@ def get_temporary_image():
 
 
 class Command(BaseCommand):
+    users = None
+
     def handle(self, *args, **options):
         """Creates the main project, demo user and demo challenge."""
         if not settings.DEBUG:
@@ -73,6 +79,7 @@ class Command(BaseCommand):
             "readerstudy",
             "workstation",
             "algorithm",
+            "algorithmuser",
         ]
         self.users = self._create_users(usernames=default_users)
 
@@ -84,8 +91,10 @@ class Command(BaseCommand):
         self._create_algorithm_demo()
         self._create_reader_studies()
         self._log_tokens()
+        self._setup_public_storage()
 
-    def _create_flatpages(self, site):
+    @staticmethod
+    def _create_flatpages(site):
         page = FlatPage.objects.create(
             url="/about/",
             title="About",
@@ -140,6 +149,10 @@ class Command(BaseCommand):
             user=self.users["retina"],
             key="f1f98a1733c05b12118785ffd995c250fe4d90da",
         )
+        Token.objects.get_or_create(
+            user=self.users["algorithmuser"],
+            key="dc3526c2008609b429514b6361a33f8516541464",
+        )
 
     def _create_demo_challenge(self):
         demo = Challenge.objects.create(
@@ -151,9 +164,15 @@ class Command(BaseCommand):
         )
         demo.add_participant(self.users["demop"])
 
-        Page.objects.create(challenge=demo, title="all", permission_lvl="ALL")
-        Page.objects.create(challenge=demo, title="reg", permission_lvl="REG")
-        Page.objects.create(challenge=demo, title="adm", permission_lvl="ADM")
+        Page.objects.create(
+            challenge=demo, title="all", permission_level="ALL"
+        )
+        Page.objects.create(
+            challenge=demo, title="reg", permission_level="REG"
+        )
+        Page.objects.create(
+            challenge=demo, title="adm", permission_level="ADM"
+        )
 
         method = Method(challenge=demo, creator=self.users["demo"])
         container = ContentFile(base64.b64decode(b""))
@@ -237,8 +256,11 @@ class Command(BaseCommand):
         for modality in modalities:
             ImagingModality.objects.create(modality=modality)
 
+        s = ChallengeSeries.objects.create(name="MICCAI")
+
         mr_modality = ImagingModality.objects.get(modality="MR")
         ex_challenge.modalities.add(mr_modality)
+        ex_challenge.series.add(s)
         ex_challenge.save()
 
     def _create_algorithm_demo(self):
@@ -255,6 +277,7 @@ class Command(BaseCommand):
             title="Test Algorithm", logo=get_temporary_image()
         )
         algorithm.editors_group.user_set.add(self.users["algorithm"])
+        algorithm.users_group.user_set.add(self.users["algorithmuser"])
 
         algorithm_image = AlgorithmImage(
             creator=self.users["algorithm"], algorithm=algorithm
@@ -309,3 +332,45 @@ class Command(BaseCommand):
     def _log_tokens():
         out = [f"\t{t.user} token is: {t}\n" for t in Token.objects.all()]
         logger.debug(f"{'*' * 80}\n{''.join(out)}{'*' * 80}")
+
+    @staticmethod
+    def _setup_public_storage():
+        """
+        Add anonymous read only to public S3 storage.
+
+        Only used in development, in production, set a similar policy manually
+        on the S3 bucket.
+        """
+        bucket_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "PublicReadGetObject",
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "s3:GetObject",
+                    "Resource": f"arn:aws:s3:::{public_s3_storage.bucket_name}/*",
+                }
+            ],
+        }
+
+        bucket_policy = json.dumps(bucket_policy)
+
+        # Get or create the bucket
+        _ = public_s3_storage.bucket
+
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=public_s3_storage.access_key,
+            aws_secret_access_key=public_s3_storage.secret_key,
+            aws_session_token=public_s3_storage.security_token,
+            region_name=public_s3_storage.region_name,
+            use_ssl=public_s3_storage.use_ssl,
+            endpoint_url=public_s3_storage.endpoint_url,
+            config=public_s3_storage.config,
+            verify=public_s3_storage.verify,
+        )
+
+        s3.put_bucket_policy(
+            Bucket=public_s3_storage.bucket_name, Policy=bucket_policy
+        )

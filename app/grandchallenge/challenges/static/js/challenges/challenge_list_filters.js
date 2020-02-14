@@ -64,7 +64,7 @@ $(document).ready(function () {
         filterbuttons.each(function (i, d) {
             log("updating according to " + d.id);
             var checkbox = $(d);
-            if (checkbox.attr("class") === "filter" && checkbox.is(':checked')) {
+            if (checkbox.attr("class") === "filter form-check-input" && checkbox.is(':checked')) {
                 active_filters.push(checkbox);
             }
             projectlinks = modifyCollection(checkbox, projectlinks)
@@ -116,11 +116,8 @@ $(document).ready(function () {
     }
 
     function update() {
-
         updateCounters();
         updateLabels();
-        hideEmptyYears();
-
     }
 
 
@@ -142,7 +139,7 @@ $(document).ready(function () {
             return collection;
         }
 
-        if (checkbox.attr("class") === "filter") {
+        if (checkbox.attr("class") === "filter form-check-input") {
             //filter checkbox will remove all others when checked
             if (checkbox.is(':checked')) {
                 log("hiding all non '." + name + "'");
@@ -196,21 +193,6 @@ $(document).ready(function () {
                 $("label#" + inputname).addClass("greyed_out")
             }
         })
-    }
-
-    function hideEmptyYears() {
-        // hide year headings without any items in them
-        $("div.yearHeader").each(function (i, d) {
-            var count = $(".projectlink." + d.id + ":visible").length;
-            log("finding $('.projectlink." + d.id + ":visible'");
-            if (count === 0) {
-                log("hiding year" + d.id);
-                $(this).hide();
-            } else {
-                //log("showing year"+ d.id + "count was " + count);
-                $(this).show();
-            }
-        });
     }
 
     function removeDuplicates(collection1, collection2) {

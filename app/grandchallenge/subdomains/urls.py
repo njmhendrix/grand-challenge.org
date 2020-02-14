@@ -1,11 +1,10 @@
+from django.conf import settings
 from django.urls import include, path
-from django.views.generic import RedirectView, TemplateView
+from django.views.generic import TemplateView
 
 from grandchallenge.challenges.views import ChallengeUpdate
-from grandchallenge.core.views import challenge_homepage
 
 urlpatterns = [
-    path("", challenge_homepage, name="challenge-homepage"),
     path(
         "robots.txt/",
         TemplateView.as_view(
@@ -13,7 +12,12 @@ urlpatterns = [
         ),
         name="subdomain_robots_txt",
     ),
-    # Note: add new namespaces to comic_URLNode(defaulttags.URLNode)
+    path(
+        "",
+        include(
+            "grandchallenge.favicons.urls", namespace="subdomain-favicons"
+        ),
+    ),
     path(
         "evaluation/",
         include("grandchallenge.evaluation.urls", namespace="evaluation"),
@@ -25,30 +29,17 @@ urlpatterns = [
     ),
     path("admins/", include("grandchallenge.admins.urls", namespace="admins")),
     path(
-        "uploads/", include("grandchallenge.uploads.urls", namespace="uploads")
-    ),
-    path(
         "datasets/",
         include("grandchallenge.datasets.urls", namespace="datasets"),
     ),
     path("update/", ChallengeUpdate.as_view(), name="update"),
     path("summernote/", include("django_summernote.urls")),
-    #################
-    #
-    # Legacy apps
-    #
-    path(
-        "files/",
-        RedirectView.as_view(pattern_name="uploads:create", permanent=False),
-    ),
-    #
-    # End Legacy
-    #
-    #################
-    # If nothing specific matches, try to resolve the url as project/pagename
     path("", include("grandchallenge.pages.urls", namespace="pages")),
-    path(
-        "media/",
-        include("grandchallenge.serving.urls", namespace="challenge-serving"),
-    ),
 ]
+
+if settings.DEBUG and settings.ENABLE_DEBUG_TOOLBAR:
+    import debug_toolbar
+
+    urlpatterns = [
+        path("__debug__/", include(debug_toolbar.urls))
+    ] + urlpatterns

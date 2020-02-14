@@ -2,6 +2,7 @@ from rest_framework.fields import CharField, FloatField
 from rest_framework.relations import SlugRelatedField
 from rest_framework.serializers import ModelSerializer
 
+from grandchallenge.api.swagger import swagger_schema_fields_for_charfield
 from grandchallenge.workstation_configs.models import (
     LookUpTable,
     WindowPreset,
@@ -48,6 +49,8 @@ class WorkstationConfigSerializer(ModelSerializer):
     default_overlay_interpolation = CharField(
         source="get_default_overlay_interpolation_display"
     )
+    default_overlay_alpha = FloatField()
+    default_zoom_scale = FloatField()
 
     class Meta:
         model = WorkstationConfig
@@ -64,8 +67,19 @@ class WorkstationConfigSerializer(ModelSerializer):
             "default_slab_thickness_mm",
             "default_slab_render_method",
             "default_orientation",
+            "default_overlay_alpha",
             "default_overlay_lut",
             "default_overlay_interpolation",
+            "default_zoom_scale",
             "show_image_info_plugin",
             "show_display_plugin",
         ]
+        swagger_schema_fields = swagger_schema_fields_for_charfield(
+            default_orientation=model._meta.get_field("default_orientation"),
+            default_slab_render_method=model._meta.get_field(
+                "default_slab_render_method"
+            ),
+            default_overlay_interpolation=model._meta.get_field(
+                "default_overlay_interpolation"
+            ),
+        )

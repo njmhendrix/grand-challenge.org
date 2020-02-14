@@ -1,17 +1,41 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
-{% load grandchallenge_tags %}
+{% load url %}
 
 {% block title %}
-    Run an algorithm - {{ block.super }}
+    Run this algorithm - {{ block.super }}
+{% endblock %}
+
+{% block breadcrumbs %}
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{% url 'home' %}"><i
+                class="fas fa-home"></i></a></li>
+        <li class="breadcrumb-item"><a
+                href="{% url 'algorithms:list' %}">Algorithms</a>
+        </li>
+        <li class="breadcrumb-item"><a
+                href="{{ algorithm.get_absolute_url }}">{{ algorithm.title }}
+        </a>
+        <li class="breadcrumb-item active"
+            aria-current="page">Run algorithm
+        </li>
+    </ol>
 {% endblock %}
 
 {% block content %}
 
-    <h2>Run an algorithm</h2>
+    <h2>Run this algorithm</h2>
 
     <p>Select the images that you would like to run the algorithm on.</p>
 
     {% crispy form %}
+
+    By running this algorithm you agree to the
+    <a href="{% url 'policies:detail' slug='terms-of-service' %}"> General Terms of
+        Service</a>{% if algorithm.additional_terms %},
+        as well as the algorithm's specific Terms of Service:
+        <p>{{ algorithm.additional_terms }}</p>
+    {% else %}.
+    {% endif %}
 
 {% endblock %}

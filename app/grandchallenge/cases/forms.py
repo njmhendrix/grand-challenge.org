@@ -3,6 +3,7 @@ from typing import List
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
 from django import forms
+from django.conf import settings
 from django.core.exceptions import ValidationError
 
 from grandchallenge.cases.models import RawImageFile, RawImageUploadSession
@@ -18,9 +19,10 @@ class UploadRawImagesForm(forms.ModelForm):
         widget=uploader.AjaxUploadWidget(multifile=True, auto_commit=False),
         label="Image files",
         help_text=(
-            "Upload images for creating a new archive<br/><br/>"
+            "The total size of all files uploaded in a single session "
+            "cannot exceed 10 GB.<br>"
             "The following file formats are supported: "
-            ".mha, .mhd, .raw, .zraw, .tiff"
+            ".mha, .mhd, .raw, .zraw, .tiff."
         ),
     )
 
@@ -35,6 +37,11 @@ class UploadRawImagesForm(forms.ModelForm):
 
         if len({f.name for f in files}) != len(files):
             raise ValidationError("Filenames must be unique.")
+
+        if sum([f.size for f in files]) > settings.UPLOAD_SESSION_MAX_BYTES:
+            raise ValidationError(
+                "Total size of all files exceeds the upload limit."
+            )
 
         return files
 
@@ -56,7 +63,7 @@ class UploadRawImagesForm(forms.ModelForm):
         ]
 
         if commit:
-            instance.save(skip_processing=True)
+            instance.save()
             RawImageFile.objects.bulk_create(raw_files)
             instance.process_images()
 

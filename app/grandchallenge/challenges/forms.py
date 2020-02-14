@@ -30,13 +30,14 @@ common_information_items = (
     "task_types",
     "modalities",
     "structures",
+    "series",
     "hidden",
     "educational",
 )
 
 common_images_items = ("logo",)
 
-event_items = ("event_name", "event_url", "workshop_date")
+event_items = ("event_url", "workshop_date")
 
 publication_items = (
     "publication_url",
@@ -84,6 +85,7 @@ class ChallengeUpdateForm(forms.ModelForm):
             "task_types": Select2MultipleWidget,
             "modalities": Select2MultipleWidget,
             "structures": Select2MultipleWidget,
+            "series": Select2MultipleWidget,
             "registration_page_text": SummernoteInplaceWidget(),
         }
 
@@ -133,4 +135,5 @@ class ExternalChallengeUpdateForm(forms.ModelForm):
             "task_types": Select2MultipleWidget,
             "modalities": Select2MultipleWidget,
             "structures": Select2MultipleWidget,
+            "series": Select2MultipleWidget,
         }

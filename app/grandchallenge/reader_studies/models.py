@@ -5,16 +5,20 @@ from django.contrib.auth.models import Group
 from django.contrib.postgres.fields import JSONField
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
-from django.db.models import Count
+from django.db.models import Avg, Count, OuterRef, Subquery, Sum
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
+from django.utils.functional import cached_property
 from django_extensions.db.models import TitleSlugDescriptionModel
 from guardian.shortcuts import assign_perm, get_objects_for_group, remove_perm
+from jsonschema import RefResolutionError
 from numpy.random.mtrand import RandomState
+from sklearn.metrics import accuracy_score
 
 from grandchallenge.cases.models import Image
 from grandchallenge.challenges.models import get_logo_path
 from grandchallenge.core.models import UUIDModel
+from grandchallenge.core.storage import public_s3_storage
 from grandchallenge.core.validators import JSONSchemaValidator
 from grandchallenge.subdomains.utils import reverse
 from grandchallenge.workstations.models import Workstation
@@ -93,7 +97,9 @@ class ReaderStudy(UUIDModel, TitleSlugDescriptionModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
-    logo = models.ImageField(upload_to=get_logo_path)
+    logo = models.ImageField(
+        upload_to=get_logo_path, storage=public_s3_storage
+    )
 
     # A hanging_list is a list of dictionaries where the keys are the
     # view names, and the values are the filenames to place there.
@@ -250,6 +256,57 @@ class ReaderStudy(UUIDModel, TitleSlugDescriptionModel):
 
         return hanging_list_images
 
+    @property
+    def image_groups(self):
+        return [sorted(x.values()) for x in self.hanging_list]
+
+    @cached_property
+    def answerable_questions(self):
+        return self.questions.exclude(answer_type=Question.ANSWER_TYPE_HEADING)
+
+    @cached_property
+    def answerable_question_count(self):
+        return self.answerable_questions.count()
+
+    def add_ground_truth(self, *, data, user):
+        answers = []
+        for gt in data:
+            images = self.images.filter(name__in=gt["images"].split(";"))
+            for key in gt.keys():
+                if key == "images":
+                    continue
+                question = self.questions.get(question_text=key)
+                if question.answer_type == Question.ANSWER_TYPE_BOOL:
+                    if gt[key] not in ["1", "0"]:
+                        raise ValidationError(
+                            "Expected 1 or 0 for answer type BOOL."
+                        )
+                    _answer = bool(int(gt[key]))
+                else:
+                    _answer = gt[key]
+                Answer.validate(
+                    creator=user,
+                    question=question,
+                    images=images,
+                    answer=_answer,
+                    is_ground_truth=True,
+                )
+                answers.append(
+                    {
+                        "answer": Answer(
+                            creator=user,
+                            question=question,
+                            answer=_answer,
+                            is_ground_truth=True,
+                        ),
+                        "images": images,
+                    }
+                )
+        for answer in answers:
+            answer["answer"].save()
+            answer["answer"].images.set(answer["images"])
+            answer["answer"].save()
+
     def get_hanging_list_images_for_user(self, *, user):
         """
         Returns a shuffled list of the hanging list images for a particular
@@ -273,56 +330,60 @@ class ReaderStudy(UUIDModel, TitleSlugDescriptionModel):
 
     def get_progress_for_user(self, user):
         if not self.is_valid or not self.hanging_list:
-            return
-
-        answerable_questions = self.questions.exclude(
-            answer_type=Question.ANSWER_TYPE_HEADING
-        )
-        answerable_question_count = answerable_questions.count()
-        hanging_list_count = len(self.hanging_list)
-
-        if answerable_question_count == 0 or hanging_list_count == 0:
             return {
                 "questions": 0.0,
                 "hangings": 0.0,
                 "diff": 0.0,
             }
 
-        expected = hanging_list_count * answerable_question_count
+        hanging_list_count = len(self.hanging_list)
+
+        if self.answerable_question_count == 0 or hanging_list_count == 0:
+            return {"questions": 0.0, "hangings": 0.0, "diff": 0.0}
+
+        expected = hanging_list_count * self.answerable_question_count
         answers = Answer.objects.filter(
-            question__in=answerable_questions, creator_id=user.id
+            question__in=self.answerable_questions,
+            creator_id=user.id,
+            is_ground_truth=False,
         ).distinct()
         answer_count = answers.count()
 
-        # There are unanswered questions
-        if answer_count % answerable_question_count != 0:
-            # Group the answers by images and filter out the images that
-            # have an inadequate amount of answers
-            unanswered_images = (
-                answers.order_by("images__name")
-                .values("images__name")
-                .annotate(answer_count=Count("images__name"))
-                .filter(answer_count__lt=answerable_question_count)
-            )
-            image_names = set(
-                unanswered_images.values_list("images__name", flat=True)
-            ).union(
-                set(
-                    Image.objects.filter(
-                        readerstudies=self, answers__isnull=True
+        # Group the answers by images and filter out the images that
+        # have an inadequate amount of answers
+        unanswered_images = (
+            answers.order_by("images__name")
+            .values("images__name")
+            .annotate(answer_count=Count("images__name"))
+            .filter(answer_count__lt=self.answerable_question_count)
+        )
+        image_names = set(
+            unanswered_images.values_list("images__name", flat=True)
+        ).union(
+            set(
+                Image.objects.filter(readerstudies=self)
+                .annotate(
+                    answers_for_user=Count(
+                        Subquery(
+                            Answer.objects.filter(
+                                creator=user,
+                                images=OuterRef("pk"),
+                                is_ground_truth=False,
+                            ).values("pk")[:1]
+                        )
                     )
-                    .distinct()
-                    .values_list("name", flat=True)
                 )
+                .filter(answers_for_user=0)
+                .distinct()
+                .values_list("name", flat=True)
             )
-            # Determine which hangings have images with unanswered questions
-            hanging_list = [set(x.values()) for x in self.hanging_list]
-            completed_hangings = [
-                x for x in hanging_list if len(x - image_names) == len(x)
-            ]
-            completed_hangings = len(completed_hangings)
-        else:
-            completed_hangings = answer_count / answerable_question_count
+        )
+        # Determine which hangings have images with unanswered questions
+        hanging_list = [set(x.values()) for x in self.hanging_list]
+        completed_hangings = [
+            x for x in hanging_list if len(x - image_names) == len(x)
+        ]
+        completed_hangings = len(completed_hangings)
 
         hangings = completed_hangings / hanging_list_count * 100
         questions = answer_count / expected * 100
@@ -330,6 +391,79 @@ class ReaderStudy(UUIDModel, TitleSlugDescriptionModel):
             "questions": questions,
             "hangings": hangings,
             "diff": questions - hangings,
+        }
+
+    def score_for_user(self, user):
+        return Answer.objects.filter(
+            creator=user, question__reader_study=self, is_ground_truth=False
+        ).aggregate(Sum("score"), Avg("score"))
+
+    @cached_property
+    def scores_by_user(self):
+        return (
+            Answer.objects.filter(
+                question__reader_study=self, is_ground_truth=False
+            )
+            .order_by("creator_id")
+            .values("creator__username")
+            .annotate(Sum("score"), Avg("score"))
+            .order_by("-score__sum")
+        )
+
+    @cached_property
+    def leaderboard(self):
+        question_count = float(self.answerable_question_count) * len(
+            self.hanging_list
+        )
+        return {
+            "question_count": question_count,
+            "grouped_scores": self.scores_by_user,
+        }
+
+    @cached_property
+    def statistics(self):
+        scores_by_question = (
+            Answer.objects.filter(
+                question__reader_study=self, is_ground_truth=False
+            )
+            .order_by("question_id")
+            .values("question__question_text")
+            .annotate(Sum("score"), Avg("score"))
+            .order_by("-score__avg")
+        )
+
+        scores_by_case = (
+            Answer.objects.filter(
+                question__reader_study=self, is_ground_truth=False
+            )
+            .order_by("images__name")
+            .values("images__name", "images__pk")
+            .annotate(Sum("score"), Avg("score"),)
+            .order_by("score__avg")
+        )
+
+        ground_truths = {}
+        questions = set()
+        for gt in Answer.objects.filter(
+            question__reader_study=self, is_ground_truth=True
+        ).values("images__name", "answer", "question__question_text"):
+            ground_truths[gt["images__name"]] = ground_truths.get(
+                gt["images__name"], {}
+            )
+            ground_truths[gt["images__name"]][
+                gt["question__question_text"]
+            ] = gt["answer"]
+            questions.add(gt["question__question_text"])
+
+        return {
+            "max_score_questions": float(len(self.hanging_list))
+            * self.scores_by_user.count(),
+            "scores_by_question": scores_by_question,
+            "max_score_cases": float(self.answerable_question_count)
+            * self.scores_by_user.count(),
+            "scores_by_case": scores_by_case,
+            "ground_truths": ground_truths,
+            "questions": questions,
         }
 
 
@@ -352,9 +486,13 @@ def delete_reader_study_groups_hook(*_, instance: ReaderStudy, using, **__):
         pass
 
 
-ANSWER_TYPE_ANNOTATIONS_SCHEMA = {
+ANSWER_TYPE_SCHEMA = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
+        "STXT": {"type": "string"},
+        "MTXT": {"type": "string"},
+        "BOOL": {"type": "boolean"},
+        "HEAD": {"type": "null"},
         "2DBB": {
             "type": "object",
             "properties": {
@@ -433,7 +571,6 @@ ANSWER_TYPE_ANNOTATIONS_SCHEMA = {
             "required": ["version", "type", "lines"],
         },
     },
-    "type": "object",
     "properties": {
         "version": {
             "type": "object",
@@ -441,21 +578,17 @@ ANSWER_TYPE_ANNOTATIONS_SCHEMA = {
             "required": ["major", "minor"],
         }
     },
+    # anyOf should exist, check Question.is_answer_valid
     "anyOf": [
+        {"$ref": "#/definitions/STXT"},
+        {"$ref": "#/definitions/MTXT"},
+        {"$ref": "#/definitions/BOOL"},
+        {"$ref": "#/definitions/HEAD"},
         {"$ref": "#/definitions/2DBB"},
         {"$ref": "#/definitions/DIST"},
         {"$ref": "#/definitions/MDIS"},
     ],
 }
-
-
-def validate_answer_json(schema: dict, obj: object) -> bool:
-    """The answer type validators must return true or false."""
-    try:
-        JSONSchemaValidator(schema=schema)(obj)
-        return True
-    except ValidationError:
-        return False
 
 
 class Question(UUIDModel):
@@ -480,23 +613,6 @@ class Question(UUIDModel):
         ),
     )
 
-    # A callable for every answer type that would validate the given answer
-    ANSWER_TYPE_VALIDATOR = {
-        ANSWER_TYPE_SINGLE_LINE_TEXT: lambda o: isinstance(o, str),
-        ANSWER_TYPE_MULTI_LINE_TEXT: lambda o: isinstance(o, str),
-        ANSWER_TYPE_BOOL: lambda o: isinstance(o, bool),
-        ANSWER_TYPE_HEADING: lambda o: False,  # Headings are not answerable
-        ANSWER_TYPE_2D_BOUNDING_BOX: lambda o: validate_answer_json(
-            ANSWER_TYPE_ANNOTATIONS_SCHEMA, o
-        ),
-        ANSWER_TYPE_DISTANCE_MEASUREMENT: lambda o: validate_answer_json(
-            ANSWER_TYPE_ANNOTATIONS_SCHEMA, o
-        ),
-        ANSWER_TYPE_MULTIPLE_DISTANCE_MEASUREMENTS: lambda o: validate_answer_json(
-            ANSWER_TYPE_ANNOTATIONS_SCHEMA, o
-        ),
-    }
-
     # What is the orientation of the question form when presented on the
     # front end?
     DIRECTION_HORIZONTAL = "H"
@@ -514,6 +630,13 @@ class Question(UUIDModel):
         (IMAGE_PORT_SECONDARY, "Secondary"),
     )
 
+    SCORING_FUNCTION_ACCURACY = "ACC"
+    SCORING_FUNCTION_CHOICES = ((SCORING_FUNCTION_ACCURACY, "Accuracy score"),)
+
+    SCORING_FUNCTIONS = {
+        SCORING_FUNCTION_ACCURACY: accuracy_score,
+    }
+
     reader_study = models.ForeignKey(
         ReaderStudy, on_delete=models.CASCADE, related_name="questions"
     )
@@ -530,6 +653,11 @@ class Question(UUIDModel):
     required = models.BooleanField(default=True)
     direction = models.CharField(
         max_length=1, choices=DIRECTION_CHOICES, default=DIRECTION_HORIZONTAL
+    )
+    scoring_function = models.CharField(
+        max_length=3,
+        choices=SCORING_FUNCTION_CHOICES,
+        default=SCORING_FUNCTION_ACCURACY,
     )
     order = models.PositiveSmallIntegerField(default=100)
 
@@ -574,6 +702,11 @@ class Question(UUIDModel):
             return ["question_text", "answer_type", "image_port", "required"]
         return []
 
+    def calculate_score(self, answer, ground_truth):
+        return self.SCORING_FUNCTIONS[self.scoring_function](
+            [answer], [ground_truth], normalize=True
+        )
+
     def save(self, *args, **kwargs):
         adding = self._state.adding
 
@@ -617,16 +750,42 @@ class Question(UUIDModel):
             )
 
     def is_answer_valid(self, *, answer):
-        return self.ANSWER_TYPE_VALIDATOR[self.answer_type](answer)
+        try:
+            return (
+                JSONSchemaValidator(
+                    schema={
+                        **ANSWER_TYPE_SCHEMA,
+                        "anyOf": [
+                            {"$ref": f"#/definitions/{self.answer_type}"}
+                        ],
+                    }
+                )(answer)
+                is None
+            )
+        except ValidationError:
+            return False
+        except RefResolutionError:
+            raise RuntimeError(
+                f"#/definitions/{self.answer_type} needs to be defined in "
+                "ANSWER_TYPE_SCHEMA."
+            )
 
 
 class Answer(UUIDModel):
     creator = models.ForeignKey(get_user_model(), on_delete=models.CASCADE)
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
     images = models.ManyToManyField("cases.Image", related_name="answers")
+    # TODO: add validators=[JSONSchemaValidator(schema=ANSWER_TYPE_SCHEMA)],
     answer = JSONField()
+    is_ground_truth = models.BooleanField(default=False)
+    score = models.FloatField(null=True)
 
-    csv_headers = Question.csv_headers + ["Answer", "Images", "Creator"]
+    csv_headers = Question.csv_headers + [
+        "Created",
+        "Answer",
+        "Images",
+        "Creator",
+    ]
 
     class Meta:
         ordering = ("creator", "created")
@@ -643,14 +802,64 @@ class Answer(UUIDModel):
     @property
     def csv_values(self):
         return self.question.csv_values + [
+            self.created.isoformat(),
             self.answer,
             "; ".join(self.images.values_list("name", flat=True)),
             self.creator.username,
         ]
 
+    @staticmethod
+    def validate(*, creator, question, answer, images, is_ground_truth=False):
+        if len(images) == 0:
+            raise ValidationError(
+                "You must specify the images that this answer corresponds to."
+            )
+
+        reader_study_images = question.reader_study.images.all()
+        for im in images:
+            if im not in reader_study_images:
+                raise ValidationError(
+                    f"Image {im} does not belong to this reader study."
+                )
+
+        if is_ground_truth:
+            if Answer.objects.filter(
+                question=question,
+                is_ground_truth=True,
+                images__in=images.values_list("id", flat=True),
+            ).exists():
+                raise ValidationError(
+                    "Ground truth already added for this question/image combination"
+                )
+        else:
+            if Answer.objects.filter(
+                creator=creator,
+                question=question,
+                images__in=images,
+                is_ground_truth=False,
+            ).exists():
+                raise ValidationError(
+                    f"User {creator} has already answered this question "
+                    f"for at least 1 of these images."
+                )
+            if not question.reader_study.is_reader(user=creator):
+                raise ValidationError(
+                    "This user is not a reader for this study."
+                )
+
+        if not question.is_answer_valid(answer=answer):
+            raise ValidationError(
+                f"Your answer is not the correct type. "
+                f"{question.get_answer_type_display()} expected, "
+                f"{type(answer)} found."
+            )
+
+    def calculate_score(self, ground_truth):
+        self.score = self.question.calculate_score(self.answer, ground_truth)
+        return self.score
+
     def save(self, *args, **kwargs):
         adding = self._state.adding
-
         super().save(*args, **kwargs)
 
         if adding:

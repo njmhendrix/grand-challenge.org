@@ -1,10 +1,16 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator, RegexValidator
+from django.core.validators import (
+    MaxValueValidator,
+    MinValueValidator,
+    RegexValidator,
+)
 from django.db import models
 from django_extensions.db.models import TitleSlugDescriptionModel
+from guardian.shortcuts import assign_perm
 
 from grandchallenge.core.models import UUIDModel
+from grandchallenge.subdomains.utils import reverse
 
 
 class WorkstationConfig(TitleSlugDescriptionModel, UUIDModel):
@@ -52,7 +58,7 @@ class WorkstationConfig(TitleSlugDescriptionModel, UUIDModel):
         related_name="workstation_default_window_presets",
     )
 
-    # 4 digits, 2 decimal places, 0.0 min, 99.99 max
+    # 4 digits, 2 decimal places, 0.01 min, 99.99 max
     default_slab_thickness_mm = models.DecimalField(
         blank=True,
         null=True,
@@ -77,6 +83,25 @@ class WorkstationConfig(TitleSlugDescriptionModel, UUIDModel):
         default=IMAGE_INTERPOLATION_TYPE_NEAREST,
         blank=True,
     )
+    # 3 digits, 2 decimal places, 0.00 min, 1.00 max
+    default_overlay_alpha = models.DecimalField(
+        blank=True,
+        null=True,
+        max_digits=3,
+        decimal_places=2,
+        validators=[
+            MinValueValidator(limit_value=0.00),
+            MaxValueValidator(limit_value=1.00),
+        ],
+    )
+    # 4 digits, 2 decimal places, 0.01 min, 99.99 max
+    default_zoom_scale = models.DecimalField(
+        blank=True,
+        null=True,
+        max_digits=4,
+        decimal_places=2,
+        validators=[MinValueValidator(limit_value=0.01)],
+    )
 
     show_image_info_plugin = models.BooleanField(default=True)
     show_display_plugin = models.BooleanField(default=True)
@@ -86,6 +111,20 @@ class WorkstationConfig(TitleSlugDescriptionModel, UUIDModel):
 
     def __str__(self):
         return f"{self.title} (created by {self.creator})"
+
+    def get_absolute_url(self):
+        return reverse(
+            "workstation-configs:detail", kwargs={"slug": self.slug}
+        )
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.creator:
+            assign_perm(
+                f"{self._meta.app_label}.change_{self._meta.model_name}",
+                self.creator,
+                self,
+            )
 
 
 class WindowPreset(TitleSlugDescriptionModel):

@@ -6,7 +6,6 @@ from distutils.util import strtobool as strtobool_i
 import sentry_sdk
 from corsheaders.defaults import default_headers
 from django.contrib.messages import constants as messages
-from django.core.exceptions import ImproperlyConfigured
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.redis import RedisIntegration
@@ -36,6 +35,8 @@ IGNORABLE_404_URLS = [
     re.compile(r"^/gen204.*"),
     re.compile(r"^/wp-content.*"),
     re.compile(r".*/trackback.*"),
+    re.compile(r"^/site/.*"),
+    re.compile(r"^/media/cache/.*"),
 ]
 
 # Used as starting points for various other paths. realpath(__file__) starts in
@@ -66,6 +67,8 @@ DEFAULT_FROM_EMAIL = os.environ.get(
 SERVER_EMAIL = os.environ.get("SERVER_EMAIL", "root@localhost")
 
 ANONYMOUS_USER_NAME = "AnonymousUser"
+REGISTERED_USERS_GROUP_NAME = "__registered_users_group__"
+REGISTERED_AND_ANON_USERS_GROUP_NAME = "__registered_and_anonymous_users__"
 
 AUTH_PROFILE_MODULE = "profiles.UserProfile"
 USERENA_USE_HTTPS = False
@@ -111,25 +114,7 @@ USE_TZ = True
 # Storage
 #
 ##############################################################################
-DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
-
-# Absolute filesystem path to the directory that will hold user-uploaded files.
-# Example: "/home/media/media.lawrence.com/media/"
-MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/dbox/Dropbox/media/")
-
-# URL that handles the media served from MEDIA_ROOT. Make sure to use a
-# trailing slash.
-# Examples: "http://media.lawrence.com/media/", "http://example.com/media/"
-MEDIA_URL = "/media/"
-
-# In each challenge there can be a single directory out of which files can be
-# downloaded without logging in.
-COMIC_PUBLIC_FOLDER_NAME = "public_html"
-COMIC_ADDITIONAL_PUBLIC_FOLDER_NAMES = ["results/public"]
-
-# In each challenge there can be a single directory from which files can only
-# be downloaded by registered participants of that project
-COMIC_REGISTERED_ONLY_FOLDER_NAME = "datasets"
+DEFAULT_FILE_STORAGE = "grandchallenge.core.storage.PublicS3Storage"
 
 # Subdirectories on root for various files
 JQFILEUPLOAD_UPLOAD_SUBIDRECTORY = "jqfileupload"
@@ -137,7 +122,6 @@ IMAGE_FILES_SUBDIRECTORY = "images"
 EVALUATION_FILES_SUBDIRECTORY = "evaluation"
 
 # This is for storing files that should not be served to the public
-AWS_DEFAULT_ACL = None
 PRIVATE_S3_STORAGE_KWARGS = {
     "access_key": os.environ.get("PRIVATE_S3_STORAGE_ACCESS_KEY", ""),
     "secret_key": os.environ.get("PRIVATE_S3_STORAGE_SECRET_KEY", ""),
@@ -150,6 +134,7 @@ PRIVATE_S3_STORAGE_KWARGS = {
     ),
     # Do not overwrite files, we get problems with jqfileupload otherwise
     "file_overwrite": False,
+    "default_acl": "private",
 }
 PROTECTED_S3_STORAGE_KWARGS = {
     "access_key": os.environ.get("PROTECTED_S3_STORAGE_ACCESS_KEY", ""),
@@ -167,6 +152,19 @@ PROTECTED_S3_STORAGE_KWARGS = {
     "custom_domain": os.environ.get(
         "PROTECTED_S3_CUSTOM_DOMAIN", "gc.localhost/media"
     ),
+    "file_overwrite": False,
+    "default_acl": "private",
+}
+PUBLIC_S3_STORAGE_KWARGS = {
+    "access_key": os.environ.get("PUBLIC_S3_STORAGE_ACCESS_KEY", ""),
+    "secret_key": os.environ.get("PUBLIC_S3_STORAGE_SECRET_KEY", ""),
+    "bucket_name": os.environ.get(
+        "PUBLIC_S3_STORAGE_BUCKET_NAME", "grand-challenge-public"
+    ),
+    "file_overwrite": False,
+    # Public bucket so do not use querystring_auth
+    "querystring_auth": False,
+    "default_acl": "public-read",
 }
 
 ##############################################################################
@@ -204,6 +202,7 @@ SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "0"))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = strtobool(
     os.environ.get("SECURE_HSTS_INCLUDE_SUBDOMAINS", "False")
 )
+SECURE_HSTS_PRELOAD = strtobool(os.environ.get("SECURE_HSTS_PRELOAD", "True"))
 SECURE_CONTENT_TYPE_NOSNIFF = strtobool(
     os.environ.get("SECURE_CONTENT_TYPE_NOSNIFF", "False")
 )
@@ -211,6 +210,9 @@ SECURE_BROWSER_XSS_FILTER = strtobool(
     os.environ.get("SECURE_BROWSER_XSS_FILTER", "False")
 )
 X_FRAME_OPTIONS = os.environ.get("X_FRAME_OPTIONS", "SAMEORIGIN")
+SECURE_REFERRER_POLICY = os.environ.get(
+    "SECURE_REFERRER_POLICY", "same-origin"
+)
 
 # Absolute path to the directory static files should be collected to.
 # Don't put anything in this directory yourself; store your static files
@@ -257,6 +259,7 @@ TEMPLATES = [
                 "grandchallenge.core.context_processors.google_keys",
                 "grandchallenge.core.context_processors.debug",
                 "grandchallenge.core.context_processors.sentry_dsn",
+                "grandchallenge.core.context_processors.policy_pages",
             ]
         },
     }
@@ -318,7 +321,6 @@ THIRD_PARTY_APPS = [
     "favicon",  # favicon management
     "django_select2",  # for multiple choice widgets
     "django_summernote",  # for WYSIWYG page editing
-    "sorl.thumbnail",  # for dynamic thumbnails
     "dal",  # for autocompletion of selection fields
     "dal_select2",  # for autocompletion of selection fields
     "django_extensions",  # custom extensions
@@ -358,6 +360,9 @@ LOCAL_APPS = [
     "grandchallenge.workstations",
     "grandchallenge.reader_studies",
     "grandchallenge.workstation_configs",
+    "grandchallenge.policies",
+    "grandchallenge.favicons",
+    "grandchallenge.products",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + LOCAL_APPS + THIRD_PARTY_APPS
@@ -425,10 +430,6 @@ SUMMERNOTE_CONFIG = {
     },
 }
 
-# sorl.thumbnail settings
-THUMBNAIL_FORMAT = "PNG"
-THUMBNAIL_ALTERNATIVE_RESOLUTIONS = [1.5, 2]
-
 # Settings for allowed HTML
 BLEACH_ALLOWED_TAGS = [
     "a",
@@ -449,7 +450,6 @@ BLEACH_ALLOWED_TAGS = [
     "h6",
     "hr",
     "i",
-    "iframe",  # Allowed for now for continuous registration challenge
     "img",
     "li",
     "ol",
@@ -472,14 +472,6 @@ BLEACH_ALLOWED_ATTRIBUTES = {
     "a": ["href", "title"],
     "abbr": ["title"],
     "acronym": ["title"],
-    "div": ["data-geochart"],  # Required for geocharts
-    "iframe": [
-        "src",
-        "sandbox",
-        "data-groupname",
-        "scrolling",
-        "height",
-    ],  # For continuous registration challenge and google group
     "img": ["height", "src", "width"],
     # For bootstrap tables: https://getbootstrap.com/docs/4.3/content/tables/
     "th": ["scope", "colspan"],
@@ -533,6 +525,7 @@ SENTRY_DSN = os.environ.get("DJANGO_SENTRY_DSN", "")
 SENTRY_ENABLE_JS_REPORTING = strtobool(
     os.environ.get("SENTRY_ENABLE_JS_REPORTING", "False")
 )
+WORKSTATION_SENTRY_DSN = os.environ.get("WORKSTATION_SENTRY_DSN", "")
 
 sentry_sdk.init(
     dsn=SENTRY_DSN,
@@ -599,7 +592,7 @@ CONTAINER_EXEC_MEMORY_LIMIT = os.environ.get(
 )
 CONTAINER_EXEC_IO_IMAGE = "alpine:3.9"
 CONTAINER_EXEC_IO_SHA256 = (
-    "sha256:055936d3920576da37aa9bc460d70c5f212028bda1c08c0879aedf03d7a66ea1"
+    "sha256:82f67be598ebc8d968137c18521fe174ca6afc9b542aa5773c32b3a3970e647c"
 )
 CONTAINER_EXEC_CPU_QUOTA = int(
     os.environ.get("CONTAINER_EXEC_CPU_QUOTA", "100000")
@@ -644,6 +637,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "grandchallenge.container_exec.tasks.mark_long_running_jobs_failed",
         "kwargs": {"app_label": "evaluation", "model_name": "job"},
         "options": {"queue": "evaluation"},
+        "schedule": timedelta(hours=1),
+    },
+    "cache_retina_archive_data": {
+        "task": "grandchallenge.retina_api.tasks.cache_archive_data",
         "schedule": timedelta(hours=1),
     },
 }
@@ -702,56 +699,10 @@ DISALLOWED_CHALLENGE_NAMES = [
     "evaluation-supplementary",
     "favicon",
     "i",
-    "cache",  # for sorl-thumbnails
+    "cache",
     JQFILEUPLOAD_UPLOAD_SUBIDRECTORY,
     *USERNAME_DENYLIST,
 ]
-
-if MEDIA_ROOT[-1] != "/":
-    msg = (
-        "MEDIA_ROOT setting should end in a slash. Found '"
-        + MEDIA_ROOT
-        + "'. Please add a slash"
-    )
-    raise ImproperlyConfigured(msg)
-
-ENABLE_DEBUG_TOOLBAR = False
-
-if DEBUG:
-    EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
-
-    # Allow localhost in development
-    CORS_ORIGIN_REGEX_WHITELIST += [r"^http://localhost:8888$"]
-
-    LOGGING["loggers"]["grandchallenge"]["level"] = "DEBUG"
-
-    if ENABLE_DEBUG_TOOLBAR:
-        INSTALLED_APPS += ("debug_toolbar",)
-
-        MIDDLEWARE = (
-            "debug_toolbar.middleware.DebugToolbarMiddleware",
-            *MIDDLEWARE,
-        )
-
-        DEBUG_TOOLBAR_CONFIG = {
-            "SHOW_TOOLBAR_CALLBACK": "config.toolbar_callback"
-        }
-
-if not COMIC_PUBLIC_FOLDER_NAME:
-    raise ImproperlyConfigured(
-        "Don't know from which folder serving publiv files"
-        "is allowed. Please add a setting like "
-        '\'COMIC_PUBLIC_FOLDER_NAME = "public_html"'
-        " to your .conf file."
-    )
-
-if not COMIC_REGISTERED_ONLY_FOLDER_NAME:
-    raise ImproperlyConfigured(
-        "Don't know from which folder serving protected files"
-        "is allowed. Please add a setting like "
-        '\'COMIC_REGISTERED_ONLY_FOLDER_NAME = "datasets"'
-        " to your .conf file."
-    )
 
 # Modality name constants
 MODALITY_OCT = "OCT"  # Optical coherence tomography
@@ -760,7 +711,15 @@ MODALITY_FA = "Flurescein Angiography"  # Fluorescein angiography
 MODALITY_IR = "Infrared Reflectance Imaging"  # Infrared Reflectance imaging
 
 # Maximum file size in bytes to be opened by SimpleITK.ReadImage in cases.models.Image.get_sitk_image()
-MAX_SITK_FILE_SIZE = 268435456  # == 256 mb
+MAX_SITK_FILE_SIZE = 268_435_456  # == 256 mb
+
+# The maximum size of all the files in an upload session in bytes
+UPLOAD_SESSION_MAX_BYTES = 15_000_000_000
+
+# Internal format to use for metaimages
+ITK_INTERNAL_FILE_FORMAT = os.environ.get(
+    "ITK_INTERNAL_FILE_FORMAT", "mha"
+).lower()
 
 # Tile size in pixels to be used when creating dzi for tif files
 DZI_TILE_SIZE = 2560
@@ -774,3 +733,34 @@ RETINA_GRADERS_GROUP_NAME = "retina_graders"
 RETINA_ADMINS_GROUP_NAME = "retina_admins"
 RETINA_IMPORT_USER_NAME = "retina_import_user"
 RETINA_EXCEPTION_ARCHIVE = "Australia"
+
+ENABLE_DEBUG_TOOLBAR = False
+
+if DEBUG:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+    # Allow localhost in development
+    CORS_ORIGIN_REGEX_WHITELIST += [r"^http://localhost:8888$"]
+
+    LOGGING["loggers"]["grandchallenge"]["level"] = "DEBUG"
+
+    PUBLIC_S3_STORAGE_KWARGS.update(
+        {
+            "custom_domain": f"localhost:9000/{PUBLIC_S3_STORAGE_KWARGS['bucket_name']}",
+            "auto_create_bucket": True,
+            "secure_urls": False,
+            "endpoint_url": "http://minio-public:9000",
+        }
+    )
+
+    if ENABLE_DEBUG_TOOLBAR:
+        INSTALLED_APPS += ("debug_toolbar",)
+
+        MIDDLEWARE = (
+            "debug_toolbar.middleware.DebugToolbarMiddleware",
+            *MIDDLEWARE,
+        )
+
+        DEBUG_TOOLBAR_CONFIG = {
+            "SHOW_TOOLBAR_CALLBACK": "config.toolbar_callback"
+        }

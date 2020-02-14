@@ -1,9 +1,19 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
-{% load grandchallenge_tags %}
+{% load url %}
 
 {% block title %}
     Create An Algorithm - {{ block.super }}
+{% endblock %}
+
+{% block breadcrumbs %}
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{% url 'home' %}"><i class="fas fa-home"></i></a></li>
+        <li class="breadcrumb-item"><a href="{% url 'algorithms:list' %}">Algorithms</a>
+        </li>
+        <li class="breadcrumb-item active"
+            aria-current="page">Create an algorithm</li>
+    </ol>
 {% endblock %}
 
 {% block content %}

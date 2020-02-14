@@ -147,8 +147,8 @@ class Executor(DockerConnection):
         return self._get_result()
 
     def _pull_images(self):
-        super()._pull_images()
         self._client.images.pull(repository=self._io_image)
+        super()._pull_images()
 
     def _create_io_volumes(self):
         for volume in [self._input_volume, self._output_volume]:
@@ -298,6 +298,15 @@ class Service(DockerConnection):
     @property
     def container(self):
         return self._client.containers.get(f"{self._job_label}-service")
+
+    def logs(self) -> str:
+        """Get the container logs for this service."""
+        try:
+            logs = self.container.logs().decode()
+        except APIError as e:
+            logs = str(e)
+
+        return logs
 
     def start(
         self,

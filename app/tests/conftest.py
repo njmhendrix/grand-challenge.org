@@ -12,6 +12,7 @@ from django.contrib.auth.models import Group
 from django.contrib.sites.models import Site
 
 from grandchallenge.cases.models import Image
+from grandchallenge.reader_studies.models import Question
 from tests.annotations_tests.factories import (
     BooleanClassificationAnnotationFactory,
     CoordinateListAnnotationFactory,
@@ -32,11 +33,16 @@ from tests.factories import (
     UserFactory,
 )
 from tests.patients_tests.factories import PatientFactory
+from tests.reader_studies_tests.factories import (
+    AnswerFactory,
+    QuestionFactory,
+    ReaderStudyFactory,
+)
 from tests.studies_tests.factories import StudyFactory
-
-# Import fixtures that are used throughout a module
-# noinspection PyUnresolvedReferences
-from tests.workstations_tests.fixtures import two_workstation_sets  # noqa
+from tests.workstations_tests.fixtures import (
+    TwoWorkstationSets,
+    workstation_set,
+)
 
 
 def pytest_addoption(parser):
@@ -61,6 +67,11 @@ def pytest_runtest_setup(item):
         #  - it (does not) require transactions
         #  - and we're (not) running transaction tests
         pytest.skip("Skipping (non) transaction tests.")
+
+
+@pytest.fixture
+def two_workstation_sets() -> TwoWorkstationSets:
+    return TwoWorkstationSets(ws1=workstation_set(), ws2=workstation_set())
 
 
 @pytest.fixture(scope="session")
@@ -422,16 +433,19 @@ def two_retina_polygon_annotation_sets():
 class MultipleLandmarkAnnotationSets(NamedTuple):
     grader1: UserFactory
     grader2: UserFactory
+    grader3: UserFactory
     landmarkset1: LandmarkAnnotationSetFactory
     landmarkset1images: List
     landmarkset2: LandmarkAnnotationSetFactory
     landmarkset2images: List
     landmarkset3: LandmarkAnnotationSetFactory
     landmarkset3images: List
+    landmarkset4: LandmarkAnnotationSetFactory
+    landmarkset4images: List
 
 
 def generate_multiple_landmark_annotation_sets(retina_grader=False):
-    graders = (UserFactory(), UserFactory())
+    graders = (UserFactory(), UserFactory(), UserFactory())
 
     if retina_grader:
         add_to_graders_group(graders)
@@ -440,6 +454,7 @@ def generate_multiple_landmark_annotation_sets(retina_grader=False):
         LandmarkAnnotationSetFactory(grader=graders[0]),
         LandmarkAnnotationSetFactory(grader=graders[1]),
         LandmarkAnnotationSetFactory(grader=graders[0]),
+        LandmarkAnnotationSetFactory(grader=graders[2]),
     )
 
     # Create child models for landmark annotation set
@@ -451,6 +466,7 @@ def generate_multiple_landmark_annotation_sets(retina_grader=False):
             5, annotation_set=landmarksets[1]
         ),
         [],
+        [],
     )
 
     images = [
@@ -460,6 +476,7 @@ def generate_multiple_landmark_annotation_sets(retina_grader=False):
         Image.objects.filter(
             singlelandmarkannotation__annotation_set=landmarksets[1].id
         ),
+        [],
         [],
     ]
 
@@ -471,6 +488,13 @@ def generate_multiple_landmark_annotation_sets(retina_grader=False):
             )
         )
         images[2].append(image)
+
+        singlelandmarkbatches[3].append(
+            SingleLandmarkAnnotationFactory.create(
+                annotation_set=landmarksets[3], image=image
+            )
+        )
+        images[3].append(image)
     singlelandmarkbatches[2].append(
         SingleLandmarkAnnotationFactory.create(annotation_set=landmarksets[2])
     )
@@ -479,12 +503,15 @@ def generate_multiple_landmark_annotation_sets(retina_grader=False):
     return MultipleLandmarkAnnotationSets(
         grader1=graders[0],
         grader2=graders[1],
+        grader3=graders[2],
         landmarkset1=landmarksets[0],
         landmarkset1images=images[0],
         landmarkset2=landmarksets[1],
         landmarkset2images=images[1],
         landmarkset3=landmarksets[2],
         landmarkset3images=images[2],
+        landmarkset4=landmarksets[3],
+        landmarkset4images=images[3],
     )
 
 
@@ -599,3 +626,46 @@ def archive_patient_study_images_set():
     and 4 images.
     """
     return generate_archive_patient_study_image_set()
+
+
+@pytest.fixture
+def reader_study_with_gt():
+    rs = ReaderStudyFactory()
+    im1, im2 = ImageFactory(name="im1"), ImageFactory(name="im2")
+    q1, q2, q3 = [
+        QuestionFactory(
+            reader_study=rs,
+            answer_type=Question.ANSWER_TYPE_BOOL,
+            question_text="q1",
+        ),
+        QuestionFactory(
+            reader_study=rs,
+            answer_type=Question.ANSWER_TYPE_BOOL,
+            question_text="q2",
+        ),
+        QuestionFactory(
+            reader_study=rs,
+            answer_type=Question.ANSWER_TYPE_BOOL,
+            question_text="q3",
+        ),
+    ]
+
+    r1, r2, editor = UserFactory(), UserFactory(), UserFactory()
+    rs.add_reader(r1)
+    rs.add_reader(r2)
+    rs.add_editor(editor)
+    rs.images.set([im1, im2])
+    rs.hanging_list = [{"main": im1.name}, {"main": im2.name}]
+    rs.save()
+
+    for question in [q1, q2, q3]:
+        for im in [im1, im2]:
+            ans = AnswerFactory(
+                question=question,
+                creator=editor,
+                answer=True,
+                is_ground_truth=True,
+            )
+            ans.images.add(im)
+
+    return rs

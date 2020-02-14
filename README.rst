@@ -1,20 +1,21 @@
 grand-challenge.org
 ===================
 
-.. image:: https://travis-ci.org/comic/grand-challenge.org.svg?branch=master
-   :target: https://travis-ci.org/comic/grand-challenge.org
-.. image:: https://api.codeclimate.com/v1/badges/b056e3bb28f145fa1bde/maintainability
-   :target: https://codeclimate.com/github/comic/grand-challenge.org/maintainability
-   :alt: Maintainability
+.. image:: https://github.com/comic/grand-challenge.org/workflows/CI/badge.svg
+   :target: https://github.com/comic/grand-challenge.org/actions?query=workflow%3ACI+branch%3Amaster
+   :alt: Build Status
 .. image:: https://codecov.io/gh/comic/grand-challenge.org/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/comic/grand-challenge.org
+   :alt: Code Coverage Status
 .. image:: https://readthedocs.org/projects/grand-challengeorg/badge/?version=latest
    :target: http://grand-challengeorg.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
 .. image:: https://img.shields.io/badge/code%20style-black-000000.svg
-    :target: https://github.com/ambv/black
+   :target: https://github.com/ambv/black
+   :alt: Black Code Style
 .. image:: https://zenodo.org/badge/4557968.svg
    :target: https://zenodo.org/badge/latestdoi/4557968
+   :alt: Cite Us with Zenodo
 
 Fair and objective comparisons of machine learning algorithms improves the
 quality of research outputs in both academia and industry. This repo
@@ -39,8 +40,3 @@ Medical Image Computing. It features:
 If you would like to start your own website, or contribute to the development
 of the framework, please see
 `the docs <http://grand-challengeorg.readthedocs.io>`_
-
-Slack
-~~~~~
-
-You can join the development slack `using this link <https://join.slack.com/t/grand-challenge-org/shared_invite/enQtNDUwNDk0OTM0MDcwLWM1YjhiMzM1ZGJhMDViMDkyOWRiMDQ5ZGY0ODc3MjUzM2YzNjkzYjcwYjRkNTVjMzIwYTNiMTg1NTE5NzE5NzE>`_. 

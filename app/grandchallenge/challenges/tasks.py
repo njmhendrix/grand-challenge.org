@@ -9,12 +9,17 @@ from grandchallenge.subdomains.utils import reverse
 
 @shared_task
 def update_filter_classes():
-    lookup = ("task_types", "modalities", "structures__region", "creator")
+    lookup = (
+        "creator",
+        "modalities",
+        "series",
+        "structures__region",
+        "task_types",
+    )
 
     for obj in [Challenge, ExternalChallenge]:
         for c in obj.objects.prefetch_related(*lookup).all():
-            classes = c.get_filter_classes()
-            kwargs = {"filter_classes": classes}
+            kwargs = {"filter_classes": c.get_filter_classes()}
 
             if isinstance(c, Challenge):
                 kwargs.update(

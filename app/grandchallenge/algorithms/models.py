@@ -15,6 +15,7 @@ from django.utils import timezone
 from django_extensions.db.models import TitleSlugDescriptionModel
 from guardian.shortcuts import assign_perm, get_objects_for_group, remove_perm
 
+from grandchallenge.algorithms.emails import send_failed_job_email
 from grandchallenge.cases.models import RawImageFile, RawImageUploadSession
 from grandchallenge.challenges.models import get_logo_path
 from grandchallenge.container_exec.backends.docker import (
@@ -26,7 +27,8 @@ from grandchallenge.container_exec.models import (
     ContainerExecJobModel,
     ContainerImageModel,
 )
-from grandchallenge.core.models import UUIDModel
+from grandchallenge.core.models import RequestBase, UUIDModel
+from grandchallenge.core.storage import public_s3_storage
 from grandchallenge.jqfileupload.models import StagedFile
 from grandchallenge.jqfileupload.widgets.uploader import StagedAjaxFile
 from grandchallenge.subdomains.utils import reverse
@@ -48,7 +50,9 @@ class Algorithm(UUIDModel, TitleSlugDescriptionModel):
         editable=False,
         related_name=f"users_of_algorithm",
     )
-    logo = models.ImageField(upload_to=get_logo_path)
+    logo = models.ImageField(
+        upload_to=get_logo_path, storage=public_s3_storage
+    )
     workstation = models.ForeignKey(
         "workstations.Workstation", on_delete=models.CASCADE
     )
@@ -67,9 +71,41 @@ class Algorithm(UUIDModel, TitleSlugDescriptionModel):
             "algorithm users group in order to do that."
         ),
     )
+    contact_information = models.TextField(
+        blank=True,
+        help_text=(
+            "Who should users contact with any questions regarding "
+            "this algorithm? This information is only displayed on the "
+            "algorithm's detail page."
+        ),
+    )
+    info_url = models.URLField(
+        blank=True,
+        help_text=(
+            "A URL to a page containing more information about "
+            "the algorithm."
+        ),
+    )
+    additional_information = models.TextField(
+        blank=True,
+        help_text=(
+            "Any additional information that might be relevant to "
+            "users for this algorithm. This is only displayed on the "
+            "algorithm's detail page."
+        ),
+    )
+    additional_terms = models.TextField(
+        blank=True,
+        help_text=(
+            "By using this algortihm, users agree to the site wide "
+            "terms of service. If your algorithm has any additional "
+            "terms of usage, define them here."
+        ),
+    )
 
     class Meta(UUIDModel.Meta, TitleSlugDescriptionModel.Meta):
         ordering = ("created",)
+        permissions = [("execute_algorithm", "Can execute algorithm")]
 
     def __str__(self):
         return f"{self.title}"
@@ -92,9 +128,7 @@ class Algorithm(UUIDModel, TitleSlugDescriptionModel):
 
         super().save(*args, **kwargs)
 
-        if adding:
-            self.assign_permissions()
-
+        self.assign_permissions()
         self.assign_workstation_permissions()
 
     def create_groups(self):
@@ -109,10 +143,24 @@ class Algorithm(UUIDModel, TitleSlugDescriptionModel):
         # Editors and users can view this algorithm
         assign_perm(f"view_{self._meta.model_name}", self.editors_group, self)
         assign_perm(f"view_{self._meta.model_name}", self.users_group, self)
+        # Editors and users can execute this algorithm
+        assign_perm(
+            f"execute_{self._meta.model_name}", self.editors_group, self
+        )
+        assign_perm(f"execute_{self._meta.model_name}", self.users_group, self)
         # Editors can change this algorithm
         assign_perm(
             f"change_{self._meta.model_name}", self.editors_group, self
         )
+
+        reg_and_anon = Group.objects.get(
+            name=settings.REGISTERED_AND_ANON_USERS_GROUP_NAME
+        )
+
+        if self.visible_to_public:
+            assign_perm(f"view_{self._meta.model_name}", reg_and_anon, self)
+        else:
+            remove_perm(f"view_{self._meta.model_name}", reg_and_anon, self)
 
     def assign_workstation_permissions(self):
         """Allow the editors and users group to view the workstation."""
@@ -356,7 +404,7 @@ class AlgorithmExecutor(Executor):
                 )
             )
 
-        upload_session.save(skip_processing=True)
+        upload_session.save()
         RawImageFile.objects.bulk_create(images)
         upload_session.process_images()
 
@@ -419,3 +467,42 @@ class Job(UUIDModel, ContainerExecJobModel):
             assign_perm(
                 f"view_{self.image._meta.model_name}", self.creator, self.image
             )
+
+    def update_status(self, *args, **kwargs):
+        res = super().update_status(*args, **kwargs)
+
+        if self.status == self.FAILURE:
+            send_failed_job_email(self)
+
+        return res
+
+
+class AlgorithmPermissionRequest(RequestBase):
+    """
+    When a user wants to view an algorithm, editors have the option of
+    reviewing each user before accepting or rejecting them. This class records
+    the needed info for that.
+    """
+
+    algorithm = models.ForeignKey(
+        Algorithm,
+        help_text="To which algorithm has the user requested access?",
+        on_delete=models.CASCADE,
+    )
+    rejection_text = models.TextField(
+        blank=True,
+        help_text=(
+            "The text that will be sent to the user with the reason for their "
+            "rejection."
+        ),
+    )
+
+    @property
+    def object_name(self):
+        return self.algorithm.title
+
+    def __str__(self):
+        return f"{self.algorithm.title} registration request by user {self.user.username}"
+
+    class Meta:
+        unique_together = (("algorithm", "user"),)

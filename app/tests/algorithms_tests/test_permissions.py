@@ -1,4 +1,5 @@
 import pytest
+from django.conf import settings
 from django.contrib.auth.models import Group
 from guardian.shortcuts import assign_perm, get_group_perms, get_perms
 
@@ -28,10 +29,12 @@ def test_algorithm_groups_permissions_are_assigned():
     editors_perms = get_group_perms(alg.editors_group, alg)
     assert "view_algorithm" in editors_perms
     assert "change_algorithm" in editors_perms
+    assert "execute_algorithm" in editors_perms
 
     users_perms = get_group_perms(alg.users_group, alg)
     assert "view_algorithm" in users_perms
     assert "change_algorithm" not in users_perms
+    assert "execute_algorithm" in users_perms
 
 
 @pytest.mark.django_db
@@ -67,8 +70,10 @@ def test_algorithm_create_page(client, settings):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("view_name", ["detail", "execution-session-create"])
-def test_algorithm_detail_view_permissions(client, view_name):
+@pytest.mark.parametrize(
+    "view_name,index", (("detail", 2), ("execution-session-create", 3))
+)
+def test_algorithm_detail_view_permissions(client, view_name, index):
     alg_set = TwoAlgorithms()
 
     # We need to fake some images to use
@@ -76,20 +81,20 @@ def test_algorithm_detail_view_permissions(client, view_name):
     AlgorithmImageFactory(ready=True, algorithm=alg_set.alg2)
 
     tests = (
-        (None, alg_set.alg1, 302),
-        (None, alg_set.alg2, 302),
-        (alg_set.creator, alg_set.alg1, 403),
-        (alg_set.creator, alg_set.alg2, 403),
-        (alg_set.editor1, alg_set.alg1, 200),
-        (alg_set.editor1, alg_set.alg2, 403),
-        (alg_set.user1, alg_set.alg1, 200),
-        (alg_set.user1, alg_set.alg2, 403),
-        (alg_set.editor2, alg_set.alg1, 403),
-        (alg_set.editor2, alg_set.alg2, 200),
-        (alg_set.user2, alg_set.alg1, 403),
-        (alg_set.user2, alg_set.alg2, 200),
-        (alg_set.u, alg_set.alg1, 403),
-        (alg_set.u, alg_set.alg2, 403),
+        (None, alg_set.alg1, 302, 302),
+        (None, alg_set.alg2, 302, 302),
+        (alg_set.creator, alg_set.alg1, 302, 403),
+        (alg_set.creator, alg_set.alg2, 302, 403),
+        (alg_set.editor1, alg_set.alg1, 200, 200),
+        (alg_set.editor1, alg_set.alg2, 302, 403),
+        (alg_set.user1, alg_set.alg1, 200, 200),
+        (alg_set.user1, alg_set.alg2, 302, 403),
+        (alg_set.editor2, alg_set.alg1, 302, 403),
+        (alg_set.editor2, alg_set.alg2, 200, 200),
+        (alg_set.user2, alg_set.alg1, 302, 403),
+        (alg_set.user2, alg_set.alg2, 200, 200),
+        (alg_set.u, alg_set.alg1, 302, 403),
+        (alg_set.u, alg_set.alg2, 302, 403),
     )
 
     for test in tests:
@@ -99,7 +104,7 @@ def test_algorithm_detail_view_permissions(client, view_name):
             client=client,
             user=test[0],
         )
-        assert response.status_code == test[2]
+        assert response.status_code == test[index]
 
 
 @pytest.mark.django_db
@@ -463,3 +468,23 @@ def test_workstation_changes(client, group):
 
     assert "view_workstation" not in get_perms(user, ws1)
     assert "view_workstation" in get_perms(user, ws2)
+
+
+@pytest.mark.django_db
+def test_visible_to_public_group_permissions():
+    g_reg_anon = Group.objects.get(
+        name=settings.REGISTERED_AND_ANON_USERS_GROUP_NAME
+    )
+    algorithm = AlgorithmFactory()
+
+    assert "view_algorithm" not in get_perms(g_reg_anon, algorithm)
+
+    algorithm.visible_to_public = True
+    algorithm.save()
+
+    assert "view_algorithm" in get_perms(g_reg_anon, algorithm)
+
+    algorithm.visible_to_public = False
+    algorithm.save()
+
+    assert "view_algorithm" not in get_perms(g_reg_anon, algorithm)

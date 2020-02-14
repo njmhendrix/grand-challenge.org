@@ -1,7 +1,6 @@
 import datetime
 import hashlib
 import logging
-import os
 import re
 from collections import namedtuple
 
@@ -13,11 +12,12 @@ from django.core.validators import validate_slug
 from django.db import models
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
-from django.utils._os import safe_join
-from guardian.shortcuts import assign_perm, remove_perm
+from django.utils.html import format_html
+from django.utils.text import get_valid_filename
 from guardian.utils import get_anonymous_user
 from tldextract import extract
 
+from grandchallenge.core.storage import public_s3_storage
 from grandchallenge.subdomains.utils import reverse
 
 logger = logging.getLogger(__name__)
@@ -40,13 +40,11 @@ def validate_short_name(value):
 
 
 def get_logo_path(instance, filename):
-    return (
-        f"logos/{instance.__class__.__name__.lower()}/{instance.pk}/{filename}"
-    )
+    return f"logos/{instance.__class__.__name__.lower()}/{instance.pk}/{get_valid_filename(filename)}"
 
 
 def get_banner_path(instance, filename):
-    return f"banners/{instance.pk}/{filename}"
+    return f"banners/{instance.pk}/{get_valid_filename(filename)}"
 
 
 class TaskType(models.Model):
@@ -65,6 +63,14 @@ class TaskType(models.Model):
         cls = re.sub(r"\W+", "", self.type)
         return f"task-{cls}"
 
+    @property
+    def badge(self):
+        return format_html(
+            '<span class="badge badge-light" title="{0} challenge">'
+            '<i class="fas fa-tasks fa-fw"></i> {0}</span>',
+            self.type,
+        )
+
 
 class ImagingModality(models.Model):
     """Store the modality options, eg, MR, CT, PET, XR."""
@@ -81,6 +87,14 @@ class ImagingModality(models.Model):
     def filter_tag(self):
         cls = re.sub(r"\W+", "", self.modality)
         return f"modality-{cls}"
+
+    @property
+    def badge(self):
+        return format_html(
+            '<span class="badge badge-secondary" title="Uses {0} data">'
+            '<i class="fas fa-microscope fa-fw"></i> {0}</span>',
+            self.modality,
+        )
 
 
 class BodyRegion(models.Model):
@@ -118,6 +132,39 @@ class BodyStructure(models.Model):
     def filter_tag(self):
         cls = re.sub(r"\W+", "", self.structure)
         return f"structure-{cls}"
+
+    @property
+    def badge(self):
+        return format_html(
+            '<span class="badge badge-dark" title="Uses {0} data">'
+            '<i class="fas fa-child fa-fw"></i> {0}</span>',
+            self.structure,
+        )
+
+
+class ChallengeSeries(models.Model):
+    name = CICharField(max_length=64, blank=False, unique=True)
+    url = models.URLField(blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        verbose_name_plural = "Challenge Series"
+
+    def __str__(self):
+        return f"{self.name}"
+
+    @property
+    def filter_tag(self):
+        cls = re.sub(r"\W+", "", self.name)
+        return f"series-{cls}"
+
+    @property
+    def badge(self):
+        return format_html(
+            '<span class="badge badge-info" title="Associated with {0}">'
+            '<i class="fas fa-globe fa-fw"></i> {0}</span>',
+            self.name,
+        )
 
 
 class ChallengeBase(models.Model):
@@ -160,7 +207,12 @@ class ChallengeBase(models.Model):
             "used."
         ),
     )
-    logo = models.ImageField(upload_to=get_logo_path, blank=True)
+    logo = models.ImageField(
+        upload_to=get_logo_path,
+        storage=public_s3_storage,
+        blank=True,
+        help_text="A logo for this challenge. Should be square with a resolution of 640x640 px or higher.",
+    )
     hidden = models.BooleanField(
         default=True,
         help_text="Do not display this Project in any public overview",
@@ -236,6 +288,11 @@ class ChallengeBase(models.Model):
         blank=True,
         help_text="What structures are used in this challenge?",
     )
+    series = models.ManyToManyField(
+        ChallengeSeries,
+        blank=True,
+        help_text="Which challenge series is this associated with?",
+    )
 
     number_of_training_cases = models.IntegerField(blank=True, null=True)
     number_of_test_cases = models.IntegerField(blank=True, null=True)
@@ -251,8 +308,9 @@ class ChallengeBase(models.Model):
     @property
     def gravatar_url(self):
         return (
-            f"https://www.gravatar.com/avatar/"
+            "https://www.gravatar.com/avatar/"
             f"{hashlib.md5(self.creator.email.lower().encode()).hexdigest()}"
+            "?s=320"
         )
 
     def get_absolute_url(self):
@@ -297,6 +355,15 @@ class ChallengeBase(models.Model):
         for tas in self.task_types.all():
             classes.add(tas.filter_tag)
 
+        # Filter by challenge series
+        for series in self.series.all():
+            classes.add(series.filter_tag)
+
+        if self.educational:
+            classes.add("educational")
+
+        classes.add(f"year-{self.year}")
+
         return list(classes)
 
     @property
@@ -315,20 +382,6 @@ class ChallengeBase(models.Model):
         """
         return extract(self.get_absolute_url()).registered_domain
 
-    @property
-    def host_link(self):
-        """
-        Copied from grandchallenge tags
-
-        Try to find out what framework this challenge is hosted on
-        """
-        domain = self.registered_domain
-
-        if domain:
-            return f'<a href="http://{domain}">{domain}</a>'
-        else:
-            return None
-
     class Meta:
         abstract = True
 
@@ -340,15 +393,12 @@ class Challenge(ChallengeBase):
     """
 
     public_folder = "public_html"
-    skin = models.CharField(
-        max_length=225,
-        default="",
-        blank=True,
-        help_text="css file to include throughout this"
-        " project. relative to project data folder",
+    skin = models.TextField(
+        default="", blank=True, help_text="CSS for this challenge.",
     )
     banner = models.ImageField(
         upload_to=get_banner_path,
+        storage=public_s3_storage,
         blank=True,
         help_text=(
             "Image that gets displayed at the top of each page. "
@@ -426,18 +476,6 @@ class Challenge(ChallengeBase):
         editable=False, blank=True, null=True
     )
 
-    def get_project_data_folder(self):
-        """Full path to root folder for all data belonging to this project."""
-        return safe_join(settings.MEDIA_ROOT, self.short_name)
-
-    def upload_dir_rel(self):
-        """Path to get and put secure uploaded files relative to MEDIA_ROOT."""
-        return os.path.join(self.short_name, "uploads")
-
-    def public_upload_dir_rel(self):
-        """Path to public uploaded files, relative to MEDIA_ROOT."""
-        return os.path.join(self.short_name, settings.COMIC_PUBLIC_FOLDER_NAME)
-
     def admin_group_name(self):
         """Return the name of this challenges admin group."""
         return self.short_name + "_admins"
@@ -470,8 +508,7 @@ class Challenge(ChallengeBase):
 
     def get_absolute_url(self):
         return reverse(
-            "challenge-homepage",
-            kwargs={"challenge_short_name": self.short_name},
+            "pages:home", kwargs={"challenge_short_name": self.short_name},
         )
 
     def add_participant(self, user):
@@ -531,74 +568,3 @@ class ExternalChallenge(ChallengeBase):
     @property
     def is_self_hosted(self):
         return False
-
-
-class ComicSiteModel(models.Model):
-    """
-    An object which can be shown or used in the framework.
-
-    This base class should handle common functions such as authorization.
-    """
-
-    title = models.SlugField(max_length=64, blank=False)
-    challenge = models.ForeignKey(
-        Challenge,
-        help_text="To which comicsite does this object belong?",
-        on_delete=models.CASCADE,
-    )
-    ALL = "ALL"
-    REGISTERED_ONLY = "REG"
-    ADMIN_ONLY = "ADM"
-    STAFF_ONLY = "STF"
-    PERMISSIONS_CHOICES = (
-        (ALL, "All"),
-        (REGISTERED_ONLY, "Registered users only"),
-        (ADMIN_ONLY, "Administrators only"),
-    )
-    PERMISSION_WEIGHTS = ((ALL, 0), (REGISTERED_ONLY, 1), (ADMIN_ONLY, 2))
-    permission_lvl = models.CharField(
-        max_length=3, choices=PERMISSIONS_CHOICES, default=ALL
-    )
-
-    def __str__(self):
-        return self.title
-
-    def can_be_viewed_by(self, user):
-        """Is user allowed to view this?"""
-        if self.permission_lvl == self.ALL:
-            return True
-        else:
-            return user.has_perm("view_ComicSiteModel", self)
-
-    def setpermissions(self, lvl):
-        """Give the right groups permissions to this object."""
-        admingroup = self.challenge.admins_group
-        participantsgroup = self.challenge.participants_group
-        self.persist_if_needed()
-        if lvl == self.ALL:
-            assign_perm("view_ComicSiteModel", admingroup, self)
-            assign_perm("view_ComicSiteModel", participantsgroup, self)
-        elif lvl == self.REGISTERED_ONLY:
-            assign_perm("view_ComicSiteModel", admingroup, self)
-            assign_perm("view_ComicSiteModel", participantsgroup, self)
-        elif lvl == self.ADMIN_ONLY:
-            assign_perm("view_ComicSiteModel", admingroup, self)
-            remove_perm("view_ComicSiteModel", participantsgroup, self)
-        else:
-            raise ValueError(
-                f"Unknown permissions level '{lvl}'. "
-                "I don't know which groups to give permissions to this object"
-            )
-
-    def persist_if_needed(self):
-        """Save the model if it has not been done so already."""
-        if not self.id:
-            super().save()
-
-    def save(self, *args, **kwargs):
-        self.setpermissions(self.permission_lvl)
-        super().save()
-
-    class Meta:
-        abstract = True
-        permissions = (("view_ComicSiteModel", "Can view Comic Site Model"),)

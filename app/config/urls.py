@@ -6,7 +6,6 @@ from django.urls import path
 from django.views.generic import TemplateView
 
 from grandchallenge.core.views import HomeTemplate
-from grandchallenge.pages.views import FaviconView
 
 admin.autodiscover()
 
@@ -25,32 +24,7 @@ urlpatterns = [
             template_name="robots.txt", content_type="text/plain"
         ),
     ),
-    # Favicons
-    path(
-        "favicon.ico/",
-        FaviconView.as_view(rel="shortcut icon"),
-        name="favicon",
-    ),
-    path(
-        "apple-touch-icon.png/",
-        FaviconView.as_view(rel="apple-touch-icon"),
-        name="apple-touch-icon",
-    ),
-    path(
-        "apple-touch-icon-precomposed.png/",
-        FaviconView.as_view(rel="apple-touch-icon-precomposed"),
-        name="apple-touch-icon-precomposed",
-    ),
-    path(
-        "apple-touch-icon-<int:size>x<int>.png/",
-        FaviconView.as_view(rel="apple-touch-icon"),
-        name="apple-touch-icon-sized",
-    ),
-    path(
-        "apple-touch-icon-<int:size>x<int>-precomposed.png/",
-        FaviconView.as_view(rel="apple-touch-icon-precomposed"),
-        name="apple-touch-icon-precomposed-sized",
-    ),
+    path("", include("grandchallenge.favicons.urls", namespace="favicons")),
     path(settings.ADMIN_URL, admin.site.urls),
     path(
         "stats/",
@@ -83,6 +57,13 @@ urlpatterns = [
             "grandchallenge.reader_studies.urls", namespace="reader-studies"
         ),
     ),
+    path(
+        "workstation-configs/",
+        include(
+            "grandchallenge.workstation_configs.urls",
+            namespace="workstation-configs",
+        ),
+    ),
     path("summernote/", include("django_summernote.urls")),
     path(
         "retina/",
@@ -95,10 +76,18 @@ urlpatterns = [
         ),
     ),
     path(
-        "media/",
-        include("grandchallenge.serving.urls", namespace="root-serving"),
+        "aiforradiology/",
+        include("grandchallenge.products.urls", namespace="products"),
+    ),
+    path(
+        "policies/",
+        include("grandchallenge.policies.urls", namespace="policies"),
+    ),
+    path(
+        "media/", include("grandchallenge.serving.urls", namespace="serving"),
     ),
 ]
+
 if settings.DEBUG and settings.ENABLE_DEBUG_TOOLBAR:
     import debug_toolbar
 

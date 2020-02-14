@@ -3,30 +3,32 @@ USER_ID = $(shell id -u)
 build_web:
 	docker build \
 		--target test \
-		-t grandchallenge/web-test:$(TRAVIS_BUILD_NUMBER)-$(TRAVIS_BRANCH_SAFE) \
+		-t grandchallenge/web-test:$(GIT_COMMIT_ID)-$(GIT_BRANCH_NAME) \
 		-t grandchallenge/web-test:latest \
 		-f dockerfiles/web/Dockerfile \
 		.
 	docker build \
 		--target dist \
-		-t grandchallenge/web:$(TRAVIS_BUILD_NUMBER)-$(TRAVIS_BRANCH_SAFE) \
+		-t grandchallenge/web:$(GIT_COMMIT_ID)-$(GIT_BRANCH_NAME) \
 		-t grandchallenge/web:latest \
 		-f dockerfiles/web/Dockerfile \
 		.
 
 build_http:
 	docker build \
-		-t grandchallenge/http:$(TRAVIS_BUILD_NUMBER)-$(TRAVIS_BRANCH_SAFE) \
+		-t grandchallenge/http:$(GIT_COMMIT_ID)-$(GIT_BRANCH_NAME) \
 		-t grandchallenge/http:latest \
 		dockerfiles/http
 
 build: build_web build_http
 
 push_web:
-	docker push grandchallenge/web:$(TRAVIS_BUILD_NUMBER)-$(TRAVIS_BRANCH_SAFE)
+	docker push grandchallenge/web:$(GIT_COMMIT_ID)-$(GIT_BRANCH_NAME)
+	docker push grandchallenge/web:latest
 
 push_http:
-	docker push grandchallenge/http:$(TRAVIS_BUILD_NUMBER)-$(TRAVIS_BRANCH_SAFE)
+	docker push grandchallenge/http:$(GIT_COMMIT_ID)-$(GIT_BRANCH_NAME)
+	docker push grandchallenge/http:latest
 
 push: push_web push_http
 

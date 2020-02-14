@@ -20,10 +20,12 @@ from grandchallenge.challenges.forms import (
 from grandchallenge.challenges.models import (
     BodyRegion,
     Challenge,
+    ChallengeSeries,
     ExternalChallenge,
     ImagingModality,
     TaskType,
 )
+from grandchallenge.challenges.tasks import update_filter_classes
 from grandchallenge.core.permissions.mixins import (
     UserIsChallengeAdminMixin,
     UserIsNotAnonMixin,
@@ -52,26 +54,41 @@ class ChallengeList(TemplateView):
         challenges = chain(
             Challenge.objects.filter(hidden=False)
             .order_by("-created")
-            .prefetch_related("creator"),
+            .select_related("creator",),
             ExternalChallenge.objects.filter(hidden=False)
             .order_by("-created")
-            .prefetch_related("creator"),
+            .select_related("creator",),
         )
 
         challenges_by_year = defaultdict(list)
         hosts = set()
         host_count = defaultdict(int)
 
-        for c in challenges:
-            challenges_by_year[c.year].append(c)
-            hosts.add(c.host_filter)
-            host_count[c.host_filter.host] += 1
-
         modalities = ImagingModality.objects.all()
         task_types = TaskType.objects.all()
         regions = BodyRegion.objects.all().prefetch_related(
             "bodystructure_set"
         )
+        challenge_series = ChallengeSeries.objects.all()
+
+        structures = {s for r in regions for s in r.bodystructure_set.all()}
+
+        tag_lookup = {
+            t.filter_tag: t
+            for t in chain(
+                modalities, task_types, structures, challenge_series
+            )
+        }
+
+        for c in challenges:
+            c.filter_tags = [
+                tag_lookup[t]
+                for t in sorted(c.filter_classes)
+                if t in tag_lookup
+            ]
+            challenges_by_year[c.year].append(c)
+            hosts.add(c.host_filter)
+            host_count[c.host_filter.host] += 1
 
         # Cannot use a defaultdict in django template so convert to dict,
         # and this must be ordered by year for display
@@ -80,6 +97,7 @@ class ChallengeList(TemplateView):
                 "modalities": modalities,
                 "body_regions": regions,
                 "task_types": task_types,
+                "challenge_series": challenge_series,
                 "challenges_by_year": OrderedDict(
                     sorted(
                         challenges_by_year.items(),
@@ -127,6 +145,11 @@ class ChallengeUpdate(
     success_message = "Challenge successfully updated"
     template_name_suffix = "_update"
 
+    def form_valid(self, form):
+        result = super().form_valid(form=form)
+        update_filter_classes.apply_async()
+        return result
+
 
 class ExternalChallengeCreate(
     UserIsStaffMixin, SuccessMessageMixin, CreateView
@@ -158,6 +181,11 @@ class ExternalChallengeUpdate(
 
     def get_success_url(self):
         return reverse("challenges:list")
+
+    def form_valid(self, form):
+        result = super().form_valid(form=form)
+        update_filter_classes.apply_async()
+        return result
 
 
 class ExternalChallengeList(UserIsStaffMixin, ListView):

@@ -18,8 +18,6 @@
 *.iso
 *.jar
 *.rar
-*.tar
-*.zip
 
 # Logs and databases #
 ######################
@@ -91,6 +89,9 @@ app/celerybeat-schedule
 
 # Local postgres data
 postgres_data/
+
+# Poetry virtualenv path
+.venv
 
 node_modules/
 dist/

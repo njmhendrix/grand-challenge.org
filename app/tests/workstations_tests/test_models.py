@@ -33,6 +33,8 @@ def test_session_environ(settings, debug):
         Token.objects.get(user=s.creator).key
         in env["GRAND_CHALLENGE_AUTHORIZATION"]
     )
+    assert env["WORKSTATION_SESSION_ID"] == str(s.pk)
+    assert "WORKSTATION_SENTRY_DSN" in env
 
     if debug:
         assert "GRAND_CHALLENGE_UNSAFE" in env
@@ -176,9 +178,9 @@ def test_session_limit(http_image, docker_client, settings):
     )
 
     # Execute the celery in place
+    settings.WORKSTATIONS_MAXIMUM_SESSIONS = 1
     settings.task_eager_propagates = (True,)
     settings.task_always_eager = (True,)
-    settings.WORKSTATIONS_MAXIMUM_SESSIONS = 1
 
     try:
         s1 = SessionFactory(workstation_image=wsi)

@@ -6,7 +6,9 @@ from typing import List
 
 from django.conf import settings
 from django.contrib.auth.models import Group
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
+from django.utils.text import get_valid_filename
 from guardian.shortcuts import assign_perm
 
 from grandchallenge.cases.image_builders.metaio_utils import load_sitk_image
@@ -19,13 +21,6 @@ from grandchallenge.subdomains.utils import reverse
 logger = logging.getLogger(__name__)
 
 
-class UploadSessionState:
-    created = "created"
-    queued = "queued"
-    running = "running"
-    stopped = "stopped"
-
-
 class RawImageUploadSession(UUIDModel):
     """
     A session keeps track of uploaded files and forms the basis of a processing
@@ -33,7 +28,21 @@ class RawImageUploadSession(UUIDModel):
     images that can be fed to processing tasks.
     """
 
-    max_length_error_message = 256
+    PENDING = 0
+    STARTED = 1
+    REQUEUED = 2
+    FAILURE = 3
+    SUCCESS = 4
+    CANCELLED = 5
+
+    STATUS_CHOICES = (
+        (PENDING, "Queued"),
+        (STARTED, "Started"),
+        (REQUEUED, "Re-Queued"),
+        (FAILURE, "Failed"),
+        (SUCCESS, "Succeeded"),
+        (CANCELLED, "Cancelled"),
+    )
 
     creator = models.ForeignKey(
         to=settings.AUTH_USER_MODEL,
@@ -42,18 +51,11 @@ class RawImageUploadSession(UUIDModel):
         on_delete=models.SET_NULL,
     )
 
-    session_state = models.CharField(
-        max_length=16, default=UploadSessionState.created
+    status = models.PositiveSmallIntegerField(
+        choices=STATUS_CHOICES, default=PENDING
     )
 
-    processing_task = models.UUIDField(null=True, default=None)
-
-    error_message = models.CharField(
-        max_length=max_length_error_message,
-        blank=False,
-        null=True,
-        default=None,
-    )
+    error_message = models.TextField(blank=False, null=True, default=None)
 
     imageset = models.ForeignKey(
         to="datasets.ImageSet",
@@ -93,36 +95,27 @@ class RawImageUploadSession(UUIDModel):
     def __str__(self):
         return (
             f"Upload Session <{str(self.pk).split('-')[0]}>, "
-            f"({self.session_state}) "
+            f"({self.get_status_display()}) "
             f"{self.error_message or ''}"
         )
 
-    def save(self, *args, skip_processing=False, **kwargs):
-        created = self._state.adding
+    def save(self, *args, **kwargs):
+        adding = self._state.adding
 
         super().save(*args, **kwargs)
 
-        if created and not skip_processing:
-            self.process_images()
+        if adding and self.creator:
+            assign_perm(f"view_{self._meta.model_name}", self.creator, self)
+            assign_perm(f"change_{self._meta.model_name}", self.creator, self)
 
     def process_images(self):
         # Local import to avoid circular dependency
         from grandchallenge.cases.tasks import build_images
 
-        try:
-            RawImageUploadSession.objects.filter(pk=self.pk).update(
-                session_state=UploadSessionState.queued,
-                processing_task=self.pk,
-            )
-
-            build_images.apply_async(args=(self.pk,))
-
-        except Exception as e:
-            RawImageUploadSession.objects.filter(pk=self.pk).update(
-                session_state=UploadSessionState.stopped,
-                error_message=f"Could not start job: {e}",
-            )
-            raise e
+        RawImageUploadSession.objects.filter(pk=self.pk).update(
+            status=RawImageUploadSession.REQUEUED,
+        )
+        build_images.apply_async(args=(self.pk,))
 
     def get_absolute_url(self):
         return reverse(
@@ -149,20 +142,31 @@ class RawImageFile(UUIDModel):
 
     staged_file_id = models.UUIDField(blank=True, null=True)
 
-    error = models.CharField(
-        max_length=256, blank=False, null=True, default=None
-    )
+    error = models.TextField(blank=False, null=True, default=None)
+
+    consumed = models.BooleanField(default=False)
+
+    @property
+    def api_url(self):
+        return reverse(
+            "api:upload-session-file-detail", kwargs={"pk": self.pk}
+        )
+
+    def save(self, *args, **kwargs):
+        adding = self._state.adding
+
+        super().save(*args, **kwargs)
+
+        if adding and self.upload_session.creator:
+            assign_perm(
+                f"view_{self._meta.model_name}",
+                self.upload_session.creator,
+                self,
+            )
 
 
 def image_file_path(instance, filename):
-    return (
-        f"{settings.IMAGE_FILES_SUBDIRECTORY}/{instance.image.pk}/{filename}"
-    )
-
-
-def case_file_path(instance, filename):
-    # legacy method, but used in a migration so cannot delete.
-    return image_file_path(instance, filename)
+    return f"{settings.IMAGE_FILES_SUBDIRECTORY}/{instance.image.pk}/{get_valid_filename(filename)}"
 
 
 class Image(UUIDModel):
@@ -240,6 +244,9 @@ class Image(UUIDModel):
     width = models.IntegerField(blank=False)
     height = models.IntegerField(blank=False)
     depth = models.IntegerField(null=True)
+    voxel_width_mm = models.FloatField(null=True)
+    voxel_height_mm = models.FloatField(null=True)
+    voxel_depth_mm = models.FloatField(null=True)
     timepoints = models.IntegerField(null=True)
     resolution_levels = models.IntegerField(null=True)
     color_space = models.CharField(
@@ -316,11 +323,24 @@ class Image(UUIDModel):
             A SimpleITK image
         """
         # self.files should contain 1 .mhd file
-        mhd_file = self.files.get(file__endswith=".mhd")
-        raw_file = self.files.get(file__endswith="raw")
+
+        try:
+            mhd_file = self.files.get(
+                image_type=ImageFile.IMAGE_TYPE_MHD, file__endswith=".mha"
+            )
+            files = [mhd_file]
+        except ObjectDoesNotExist:
+            # Fallback to files that are still stored as mhd/(z)raw
+            mhd_file = self.files.get(
+                image_type=ImageFile.IMAGE_TYPE_MHD, file__endswith=".mhd"
+            )
+            raw_file = self.files.get(
+                image_type=ImageFile.IMAGE_TYPE_MHD, file__endswith="raw"
+            )
+            files = [mhd_file, raw_file]
 
         file_size = 0
-        for file in (mhd_file, raw_file):
+        for file in files:
             if not file.file.storage.exists(name=file.file.name):
                 raise FileNotFoundError(f"No file found for {file.file}")
 
@@ -334,7 +354,7 @@ class Image(UUIDModel):
             )
 
         with TemporaryDirectory() as tempdirname:
-            for file in (mhd_file, raw_file):
+            for file in files:
                 with file.file.open("rb") as infile, open(
                     Path(tempdirname) / Path(file.file.name).name, "wb"
                 ) as outfile:

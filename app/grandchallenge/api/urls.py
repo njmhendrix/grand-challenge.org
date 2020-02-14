@@ -13,6 +13,7 @@ from grandchallenge.algorithms.views import (
 )
 from grandchallenge.cases.views import (
     ImageViewSet,
+    RawImageFileViewSet,
     RawImageUploadSessionViewSet,
 )
 from grandchallenge.jqfileupload.views import StagedFileViewSet
@@ -21,33 +22,42 @@ from grandchallenge.reader_studies.views import (
     QuestionViewSet,
     ReaderStudyViewSet,
 )
+from grandchallenge.retina_api.views import LandmarkAnnotationSetViewSet
+from grandchallenge.subdomains.utils import reverse_lazy
 from grandchallenge.workstation_configs.views import WorkstationConfigViewSet
 from grandchallenge.workstations.views import SessionViewSet
 
 app_name = "api"
 
 router = routers.DefaultRouter()
+
+# Algorithms
 router.register(
-    r"cases/upload-sessions",
-    RawImageUploadSessionViewSet,
-    basename="upload-session",
-)
-router.register(r"cases/images", ImageViewSet, basename="image")
-router.register(r"workstations/sessions", SessionViewSet)
-router.register(
-    r"workstations/configs",
-    WorkstationConfigViewSet,
-    basename="workstations-config",
+    r"algorithms/images", AlgorithmImageViewSet, basename="algorithms-image"
 )
 router.register(r"algorithms/jobs", JobViewSet, basename="algorithms-job")
 router.register(
     r"algorithms/results", ResultViewSet, basename="algorithms-result"
 )
-router.register(
-    r"algorithms/images", AlgorithmImageViewSet, basename="algorithms-image"
-)
 router.register(r"algorithms", AlgorithmViewSet, basename="algorithm")
 
+# Cases
+router.register(r"cases/images", ImageViewSet, basename="image")
+router.register(
+    r"cases/upload-sessions/files",
+    RawImageFileViewSet,
+    basename="upload-session-file",
+)
+router.register(
+    r"cases/upload-sessions",
+    RawImageUploadSessionViewSet,
+    basename="upload-session",
+)
+
+# Chunked uploads
+router.register(r"chunked-uploads", StagedFileViewSet, basename="staged-file")
+
+# Reader studies
 router.register(
     r"reader-studies/answers", AnswerViewSet, basename="reader-studies-answer"
 )
@@ -57,17 +67,35 @@ router.register(
     basename="reader-studies-question",
 )
 router.register(r"reader-studies", ReaderStudyViewSet, basename="reader-study")
-router.register(r"chunked-uploads", StagedFileViewSet, basename="staged-file")
 
-# TODO: add terms_of_service and contact
+# Retina
+router.register(
+    r"retina/landmark-annotation",
+    LandmarkAnnotationSetViewSet,
+    basename="landmark-annotation",
+)
+
+# Workstations
+router.register(
+    r"workstations/configs",
+    WorkstationConfigViewSet,
+    basename="workstations-config",
+)
+router.register(r"workstations/sessions", SessionViewSet)
+
+
 schema_view = get_schema_view(
     openapi.Info(
         title=f"{settings.SESSION_COOKIE_DOMAIN.lstrip('.')} API",
         default_version="v1",
         description=f"The API for {settings.SESSION_COOKIE_DOMAIN.lstrip('.')}.",
         license=openapi.License(name="Apache License 2.0"),
+        terms_of_service=reverse_lazy(
+            "policies:detail", kwargs={"slug": "terms-of-service"}
+        ),
     ),
-    permission_classes=(permissions.IsAuthenticated,),
+    public=True,
+    permission_classes=(permissions.AllowAny,),
     patterns=[path("api/v1/", include(router.urls))],
 )
 
@@ -81,5 +109,5 @@ urlpatterns = [
     # the serializers
     path("v1/", include(router.urls)),
     path("auth/", include("rest_framework.urls", namespace="rest_framework")),
-    path("", schema_view.with_ui("swagger"), name="schema-docs",),
+    path("", schema_view.with_ui("swagger"), name="schema-docs"),
 ]

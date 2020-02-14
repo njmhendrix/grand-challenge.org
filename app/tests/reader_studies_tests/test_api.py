@@ -142,7 +142,8 @@ def test_answer_creator_is_reader(client):
         (Question.ANSWER_TYPE_MULTI_LINE_TEXT, "dgfsgfds", 201),
         (Question.ANSWER_TYPE_MULTI_LINE_TEXT, True, 400),
         (Question.ANSWER_TYPE_HEADING, True, 400),
-        (Question.ANSWER_TYPE_HEADING, "fdsa", 400),
+        (Question.ANSWER_TYPE_HEADING, "null", 400),
+        (Question.ANSWER_TYPE_HEADING, None, 400),
         (Question.ANSWER_TYPE_2D_BOUNDING_BOX, "", 400),
         (Question.ANSWER_TYPE_2D_BOUNDING_BOX, True, 400),
         (Question.ANSWER_TYPE_2D_BOUNDING_BOX, False, 400),
@@ -299,6 +300,40 @@ def test_answer_is_correct_type(client, answer_type, answer, expected):
         content_type="application/json",
     )
     assert response.status_code == expected
+
+
+@pytest.mark.django_db
+def test_ground_truth_is_excluded(client):
+    im = ImageFactory()
+    rs = ReaderStudyFactory()
+    rs.images.add(im)
+
+    editor = UserFactory()
+    rs.add_editor(editor)
+    rs.add_reader(editor)
+
+    q = QuestionFactory(reader_study=rs, answer_type=Question.ANSWER_TYPE_BOOL)
+
+    a1 = AnswerFactory(
+        question=q, creator=editor, answer=True, is_ground_truth=True
+    )
+    a1.images.add(im)
+
+    a2 = AnswerFactory(
+        question=q, creator=editor, answer=True, is_ground_truth=False
+    )
+    a2.images.add(im)
+
+    response = get_view_for_user(
+        viewname="api:reader-studies-answer-mine",
+        user=editor,
+        client=client,
+        method=client.get,
+        content_type="application/json",
+    )
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["pk"] == str(a2.pk)
 
 
 @pytest.mark.django_db
