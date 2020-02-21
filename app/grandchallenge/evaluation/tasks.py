@@ -1,6 +1,8 @@
 import uuid
 from statistics import mean, median
-
+from itertools import permutations
+from scipy.stats import wilcoxon
+import numpy as np
 from celery import shared_task
 from django.db.models import Q
 
@@ -44,13 +46,33 @@ def filter_by_creators_best(*, results, ranks):
 
     return [r for r in best_result_per_user.values()]
 
+def calculate_statistical_ranking(*, results, signif_level=0.05):
+    # dat.shape = (number of algorithms, samplesize)
+
+    # get all the matching between the algorithms,
+    pair_matching = permutations(range(results.shape[0]), 2)
+    scores = {}
+    ranks = {}
+    print('pair matching', pair_matching)
+
+    # Considering for a single task.
+    for j, i in pair_matching:
+        if not j in ranks:
+            ranks[(j)] = []
+        rank, pvalue = wilcoxon(results[j, :], results[i, :], alternative="greater")
+        scores[(j, i)] = pvalue
+        ranks[(j)].append(int(pvalue < signif_level))
+
+    final_score = [np.mean(ranks[(i)]) for i in range(results.shape[0])]
+
+    return final_score
 
 @shared_task  # noqa: C901
 def calculate_ranks(*, challenge_pk: uuid.UUID):  # noqa: C901
     challenge = Challenge.objects.get(pk=challenge_pk)
     display_choice = challenge.evaluation_config.result_display_choice
     score_method_choice = challenge.evaluation_config.scoring_method_choice
-
+    # here we have score_method_choice.
     metrics = (
         Metric(
             path=challenge.evaluation_config.score_jsonpath,
@@ -60,14 +82,14 @@ def calculate_ranks(*, challenge_pk: uuid.UUID):  # noqa: C901
             ),
         ),
     )
-
-    if score_method_choice != Config.ABSOLUTE:
+    #
+    if score_method_choice != Config.ABSOLUTE or (score_method_choice != Config.STAT):
         metrics += tuple(
             Metric(path=col["path"], reverse=col["order"] == Config.DESCENDING)
             for col in challenge.evaluation_config.extra_results_columns
         )
 
-    if score_method_choice == Config.ABSOLUTE and len(metrics) == 1:
+    if (score_method_choice == Config.ABSOLUTE or (score_method_choice == Config.STAT)) and len(metrics) == 1:
 
         def score_method(x):
             return list(x)[0]
@@ -76,6 +98,7 @@ def calculate_ranks(*, challenge_pk: uuid.UUID):  # noqa: C901
         score_method = mean
     elif score_method_choice == Config.MEDIAN:
         score_method = median
+
     else:
         raise NotImplementedError
 
@@ -86,6 +109,9 @@ def calculate_ranks(*, challenge_pk: uuid.UUID):  # noqa: C901
         .order_by("-created")
         .select_related("job__submission")
     )
+
+    if score_method_choice == Config.STAT:
+        print('converting the results to statistical ranking.')
 
     if display_choice == Config.MOST_RECENT:
         valid_results = filter_by_creators_most_recent(results=valid_results)

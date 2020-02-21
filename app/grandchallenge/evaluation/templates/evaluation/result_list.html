@@ -26,6 +26,8 @@
                     <th>Mean Position</th>
                 {% elif evaluation_config.scoring_method_choice == evaluation_config.MEDIAN %}
                     <th>Median Position</th>
+                {% elif evaluation_config.scoring_method_choice == evaluation_config.STAT %}
+                    <th>Statistical Ranking</th>
                 {% endif %}
 
                 <th

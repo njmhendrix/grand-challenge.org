@@ -119,6 +119,7 @@ class Config(UUIDModel):
     ABSOLUTE = "abs"
     MEAN = "avg"
     MEDIAN = "med"
+    STAT = "stat"
     SCORING_CHOICES = (
         (ABSOLUTE, "Use the absolute value of the score column"),
         (
@@ -129,6 +130,8 @@ class Config(UUIDModel):
             MEDIAN,
             "Use the median of the relative ranks of the score and extra result columns",
         ),
+
+        (STAT, "Use the statistical ranking for the absolute value of the score column"),
     )
 
     challenge = models.OneToOneField(
@@ -194,7 +197,7 @@ class Config(UUIDModel):
         validators=[JSONSchemaValidator(schema=EXTRA_RESULT_COLUMNS_SCHEMA)],
     )
     scoring_method_choice = models.CharField(
-        max_length=3,
+        max_length=4,
         choices=SCORING_CHOICES,
         default=ABSOLUTE,
         help_text=("How should the rank of each result be calculated?"),
