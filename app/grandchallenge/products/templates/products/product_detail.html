@@ -29,7 +29,7 @@
     <div class="row py-2">
       <div class="col-sm-9 py-2 ">
         <table class="table table-borderless">
-          <tr>{{ product.description|linebreaksbr }} </tr>
+          <tr>{{ product.description|clean|linebreaksbr }} </tr>
         </table>
       </div>
     </div>
@@ -146,7 +146,7 @@
           <tr>
             <td class="text-muted">FDA</td>
             <td>
-              {{product.get_fda_status_display}}{% if product.fda_class %}, {{product.fda_class}}{% endif %}
+              {{product.get_fda_status_display}}{% if product.fda_class %}, {{product.fda_class|clean}}{% endif %}
             </td>
           </tr>
           <thead class="thead-light">
